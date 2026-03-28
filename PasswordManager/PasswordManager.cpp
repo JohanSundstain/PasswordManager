@@ -1,80 +1,69 @@
-﻿#define SODIUM_STATIC
+#define SODIUM_STATIC
 
-#include <sodium.h>
 #include <iostream>
 #include <string>
+#include <sodium.h>
+#include <fstream>
+#include <stdexcept>
 
-#include <windows.h>
-#include <comdef.h>
-#include <Wbemidl.h>
+#include "PasswordManager.h"
+#include "GuardAllocator.hpp"
 
+PasswordManager::PasswordManager()
+{
+	header = std::make_unique<Header>();
+	
+};
 
-class Screen
+PasswordManager::~PasswordManager()
 {
 
 };
 
-class App
-{
 
+void PasswordManager::decode_file()
+{
+	std::ifstream in(data_file.c_str(), std::ios::binary);
 };
 
-#pragma comment(lib, "wbemuuid.lib")
 
-int main()
+void PasswordManager::read_file()
 {
-    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hr)) return 1;
+	std::ifstream in(data_file.c_str(), std::ios::binary);
 
-    hr = CoInitializeSecurity(NULL, -1, NULL, NULL,
-        RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE, NULL);
-    if (FAILED(hr)) return 1;
+	if (!in.is_open())
+	{
+		header->num_of_records = 0;
+		randombytes_buf(header->salt, sizeof(header->salt));
 
-    IWbemLocator* locator = NULL;
-    hr = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
-        IID_IWbemLocator, (LPVOID*)&locator);
-    if (FAILED(hr)) return 1;
+		std::ofstream out(data_file.c_str(), std::ios::binary);
 
-    IWbemServices* svc = NULL;
-    hr = locator->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, NULL, 0, 0, &svc);
-    if (FAILED(hr)) return 1;
+		out.write((const char*)header.get(), sizeof(Header));
 
-    CoSetProxyBlanket(svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
-        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
-        NULL, EOAC_NONE);
+		if (!out.good())
+		{
+			throw std::runtime_error("read_file: could not write a file");
+		}
 
-    IEnumWbemClassObject* enumerator = NULL;
-    hr = svc->ExecQuery(bstr_t("WQL"),
-        bstr_t("SELECT DeviceID, Model, SerialNumber FROM Win32_DiskDrive"),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-        NULL, &enumerator);
+		out.close();
 
-    IWbemClassObject* obj;
-    ULONG retVal = 0;
-    while (enumerator) {
-        HRESULT hr2 = enumerator->Next(WBEM_INFINITE, 1, &obj, &retVal);
-        if (0 == retVal) break;
+		in.open(data_file.c_str(), std::ios::binary);
+	}
 
-        VARIANT val;
-        obj->Get(L"DeviceID", 0, &val, 0, 0);
-        std::wcout << L"DeviceID: " << val.bstrVal << L"\n";
-        VariantClear(&val);
+	in.read(reinterpret_cast<char*>(header.get()), sizeof(Header));
 
-        obj->Get(L"Model", 0, &val, 0, 0);
-        std::wcout << L"Model: " << val.bstrVal << L"\n";
-        VariantClear(&val);
+	if (sodium_memcmp(header->check_word, "decoded", 7) == 0)
+	{
+		std::cout << "Success" << std::endl;
 
-        obj->Get(L"SerialNumber", 0, &val, 0, 0);
-        std::wcout << L"Serial: " << val.bstrVal << "\n\n";
-        VariantClear(&val);
+		if (header->num_of_records > 0)
+		{
+			records.resize(header->num_of_records);
 
-        obj->Release();
-    }
+			in.read(reinterpret_cast<char*>(records.data()), sizeof(Record) * header->num_of_records);
+		}
+	}
 
-    svc->Release();
-    locator->Release();
-    enumerator->Release();
-    CoUninitialize();
+	in.close();
 
-    return 0;
 }
