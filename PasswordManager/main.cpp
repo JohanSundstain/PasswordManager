@@ -1,22 +1,10 @@
-﻿#define SODIUM_STATIC
-
-#include <sodium.h>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <conio.h>
-#include <deque>
-#include <variant>
-
-#include "PasswordManager.h"
-#include "GuardAllocator.hpp"
-
+﻿#include "PasswordManager.h"
 
 
 int main()
 {
+  
     PasswordManager pm;
-
     pm.run();
 
     return 0;

@@ -1,6 +1,7 @@
 #pragma once 
 #include <windows.h>
 #include <stdexcept>
+#include <tuple>
 
 template <class T>
 class GuardAllocator
@@ -73,11 +74,14 @@ public:
 	{
 		if (ptr == NULL) return;
 
+
 		SYSTEM_INFO sys_info;
 		GetSystemInfo(&sys_info);
 
 		size_t page_size = sys_info.dwPageSize;
 		size_t data_size = ((n * sizeof(T) + page_size - 1) / page_size) * page_size;
+
+		SecureZeroMemory(ptr, data_size);
 	
 		void* base_ptr = reinterpret_cast<char*>(ptr) - page_size;
 
@@ -90,3 +94,43 @@ public:
 
 	bool operator!=(const GuardAllocator&) const { return false; }
 };
+
+
+template <typename... TContainers>
+class Bottleneck
+{
+private:
+	std::tuple<TContainers&...> _args;
+public:
+	Bottleneck(TContainers&... args)
+		: _args(args...)
+	{
+		std::apply([](auto&... containers)
+			{
+				(containers.get_allocator().unlock(containers.data(), containers.capacity()) , ...);
+			},
+			_args);
+	}
+
+	~Bottleneck()
+	{
+		std::apply(
+			[](auto&... containers)
+			{
+				(containers.get_allocator().lock(containers.data(), containers.capacity()) , ...);
+			},
+			_args);
+	}
+
+	Bottleneck(const Bottleneck&) = delete;
+	Bottleneck& operator=(const Bottleneck&) = delete;
+};
+
+
+template <typename... TContainers>
+inline void EmergencyRemoval(TContainers&... args)
+{
+	Bottleneck lock(args...);
+	(SecureZeroMemory(args.data(), args.capacity() * sizeof(typename TContainers::value_type)), ...);
+};
+
