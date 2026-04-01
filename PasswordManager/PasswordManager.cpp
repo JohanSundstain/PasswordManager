@@ -7,11 +7,14 @@
 #include <stdexcept>
 #include <filesystem>
 #include <sstream>
+#include <chrono>
 
 #include "PasswordManager.h"
 #include "GuardAllocator.hpp"
 
 namespace fs = std::filesystem;
+
+using namespace std::chrono_literals;
 
 PasswordManager::PasswordManager()
 {
@@ -22,7 +25,8 @@ PasswordManager::PasswordManager()
 	header_ptr = std::make_unique<Header>();
 	console_ptr = std::make_unique<Console>();
 
-	records = CreateSafeVector<Record>(MIN_RECORD);
+	records.reserve(MIN_RECORD);
+	passwords = CreateSafeVector<Password>(MIN_RECORD);
 	master_password = CreateSafeVector<wchar_t>(PASSWORD_MAX);
 
 	state = States::LAUNCH;
@@ -30,7 +34,7 @@ PasswordManager::PasswordManager()
 
 PasswordManager::~PasswordManager()
 {
-	EmergencyRemoval(master_password, records);
+	EmergencyRemoval(master_password, passwords);
 };
 
 uint32_t PasswordManager::confirm_password(
@@ -74,10 +78,46 @@ uint32_t PasswordManager::confirm_password(
 		console_ptr->wait_key();
 		return Console::CODES::ERR;
 	}
+	else if(primary_buffer.size() == 0)
+	{
+		console_ptr->message_box(L"password cannot be empty", 0, 2, Console::ERR, NULL);
+		console_ptr->wait_key();
+		return Console::CODES::ERR;
+	}
 	else
 	{
 		return Console::CODES::OK;
 	}
+}
+
+void PasswordManager::register_names()
+{
+	std::array<wchar_t, USER_INFO_LIMIT> tmp_array;
+	for (Record& rec : records)
+	{
+		std::copy(std::begin(rec.name),std::end(rec.name), tmp_array.begin());
+		console_ptr->update_presumer(tmp_array);
+	}
+}
+
+void PasswordManager::error(const wchar_t* message)
+{
+	console_ptr->clean_rect(0, 2, 128, 3);
+	console_ptr->message_box(message, 0, 2, Console::ERR, NULL);
+	console_ptr->wait_key();
+}
+
+void PasswordManager::success(const wchar_t* message)
+{
+	console_ptr->clean_rect(0, 2, 128, 3);
+	console_ptr->message_box(message, 0, 2, Console::OK, NULL);
+	console_ptr->wait_key();
+}
+
+void PasswordManager::progress_bar(const wchar_t* message,std::chrono::milliseconds)
+{
+	console_ptr->clean();
+	console_ptr->wait_progress_bar(message, 32, 500ms, 2, 2);	
 }
 
 void PasswordManager::launch()
@@ -87,6 +127,11 @@ void PasswordManager::launch()
 		state = States::SIGN_UP;
 		header_ptr->num_of_records = 0;
 		randombytes_buf(header_ptr->salt, sizeof(header_ptr->salt));
+		records.resize(MIN_RECORD);
+		{
+			Bottleneck lock(passwords);
+			passwords.resize(MIN_RECORD);
+		}
 	}
 	else
 	{
@@ -96,6 +141,7 @@ void PasswordManager::launch()
 
 void PasswordManager::sign_up()
 {
+	console_ptr->clean();
 	SafeVector<wchar_t> primary_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
 	SafeVector<wchar_t> confirm_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
 
@@ -115,6 +161,7 @@ void PasswordManager::sign_up()
 				confirm_buffer.data(),
 				confirm_buffer.size() * sizeof(wchar_t));
 		}
+		progress_bar(L"loading", 500ms);
 		state = States::MENU;
 	}
 
@@ -131,20 +178,21 @@ void PasswordManager::sign_in()
 		std::fill(master_password.begin(), master_password.end(), 0);
 		master_password.clear();
 	}
-
-	DWORD read = console_ptr->interact(L"enter a master password", 0, 0, master_password);
 	
+	ask(L"enter a master password", master_password);
 	uint32_t result = decode_file();
+
+	progress_bar(L"cheaking", 500ms);
 
 	if (result == Console::CODES::OK)
 	{
 		state = States::MENU;
+		register_names();
 		return;
 	}
 	else
 	{
-		console_ptr->message_box(L"wrong password. press any key", 0, 2, Console::ERR, NULL);
-		console_ptr->wait_key();
+		error(L"wrong password. press any key");
 	}
 
 	return;
@@ -154,7 +202,7 @@ void PasswordManager::exit()
 {
 	state = States::END;
 	encode_file();
-	EmergencyRemoval(master_password, records);
+	EmergencyRemoval(master_password, passwords);
 }
 
 void PasswordManager::menu()
@@ -181,46 +229,183 @@ void PasswordManager::menu()
 
 }
 
+void PasswordManager::copy_password(size_t index)
+{
+	console_ptr->clean();
+	SafeVector<wchar_t> confirm_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+
+	ask(L"master password", confirm_buffer);
+
+	int result;
+	{
+		Bottleneck lock(master_password, confirm_buffer);
+		result = sodium_memcmp(master_password.data(),
+			confirm_buffer.data(),
+			confirm_buffer.size() * sizeof(wchar_t));
+	}
+
+	if (result != 0 || confirm_buffer.size() == 0 || master_password.size() != confirm_buffer.size())
+	{
+		error(L"wrong password");
+		state = States::MENU;
+		return;
+	}
+
+	HGLOBAL hLogin = GlobalAlloc(GMEM_MOVEABLE, USER_INFO_LIMIT * sizeof(wchar_t));
+	bool is_copied = false;
+	if (OpenClipboard(NULL))
+	{
+		EmptyClipboard();
+		{
+			Bottleneck lock(passwords);
+			is_copied = CopyToClipboard(reinterpret_cast<const wchar_t*>(passwords[index].login), USER_INFO_LIMIT, hLogin);
+		}
+		if (!is_copied)
+		{
+			GlobalFree(hLogin);
+			error(L"cannot copy login to clipboard");
+			state = States::MENU;
+			return;
+		}
+		CloseClipboard();
+	}
+
+	progress_bar(L"copying", 500ms);
+
+	is_copied = false;
+	HGLOBAL hPass = GlobalAlloc(GMEM_MOVEABLE, PASSWORD_MAX * sizeof(wchar_t));
+	if (OpenClipboard(NULL))
+	{
+		EmptyClipboard();
+		{
+			Bottleneck lock(passwords);
+			is_copied = CopyToClipboard(reinterpret_cast<const wchar_t*>(passwords[index].password), PASSWORD_MAX, hPass);
+		}
+		if (!is_copied)
+		{
+			GlobalFree(hPass);
+			error(L"cannot copy password to clipboard");
+			state = States::MENU;
+			return;
+		}
+		CloseClipboard();
+	}
+
+	if (is_copied)
+	{
+		state = States::MENU;
+		return;
+	}
+	
+	state = States::MENU;
+	
+}
 
 void PasswordManager::find_password()
 {
+	console_ptr->clean();
+	std::vector<wchar_t> alias;
+	alias.reserve(USER_INFO_LIMIT);
 
+	ask(L"enter password's alias", alias);
+
+	wchar_t* ptr = alias.data();
+
+	auto it = std::find_if(
+		records.begin(), 
+		records.end(),
+		[ptr](Record& record)
+		{
+			return std::wcsncmp(ptr, record.name, USER_INFO_LIMIT) == 0;
+		});
+
+	if (it != records.end())
+	{
+		size_t index = std::distance(records.begin(), it);
+		success(L"password found");
+
+		std::vector<std::wstring> options = {
+		L"  COPY  ",
+		L" DELETE ",
+		L"  MENU  "};
+
+		uint32_t option = console_ptr->menu(options);
+
+		if (option == 0)
+		{
+			copy_password(index);
+		}
+		if (option == 1)
+		{
+			delete_password(index);
+		}
+		if (option == 2)
+		{
+			state = States::MENU;
+		}
+
+	}
+	else
+	{
+		error(L"password was not found");
+		state = States::MENU;
+	}
+}
+
+void PasswordManager::delete_password(size_t index)
+{
+	console_ptr->clean();
+	SafeVector<wchar_t> confirm_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+
+	ask(L"master password", confirm_buffer);
+
+	int result;
+	{
+		Bottleneck lock(master_password, confirm_buffer);
+		result = sodium_memcmp(master_password.data(),
+			confirm_buffer.data(),
+			confirm_buffer.size() * sizeof(wchar_t));
+	}
+
+	if (result != 0 || confirm_buffer.size() == 0 || master_password.size() != confirm_buffer.size())
+	{
+		error(L"wrong password");
+		state = States::MENU;
+		return;
+	}
+
+	{
+		Bottleneck lock(passwords);
+		passwords.erase(passwords.begin() + index);
+	}
+	records.erase(records.begin()+index);
+
+	progress_bar(L"deleting", 500ms);
+
+	state = States::MENU;
+
+	
 }
 
 void PasswordManager::save_password()
 {
 	console_ptr->clean();
+	std::vector<wchar_t> alias;
+	std::vector<wchar_t> login;
 
-	std::vector<wchar_t> name(NAME_MAX*2);
-	std::vector<wchar_t> login(LOGIN_MAX*2);
-	DWORD read = console_ptr->interact(L"alias", 0, 0, name);
+	alias.reserve(USER_INFO_LIMIT);
+	login.reserve(USER_INFO_LIMIT);
 
-	if (read - 2 == 0)
-	{
-		console_ptr->message_box(L"the alias cannot be empty", 0, 2, Console::CODES::ERR, NULL);
-		console_ptr->wait_key();
-		return;
-	}
-	if (read - 2 > NAME_MAX)
-	{
-		console_ptr->message_box(L"the alias is too long", 0, 2, Console::CODES::ERR, NULL);
-		console_ptr->wait_key();
-		return;
-	}
-	
-	console_ptr->clean_rect(0, 0, 128, 5);
-	console_ptr->label(L"alias", name.data(), 0, 6);
-	read = console_ptr->interact(L"login", 0, 0, login);
-
-	if (read-2 == 0)
-	{
-		console_ptr->message_box(L"the login cann't be empty", 0, 2, Console::CODES::ERR, NULL);
-		console_ptr->wait_key();
-		return;
-	}
+	ask(L"alias", alias);
+	if (alias.size() == 0) { error(L"the alias cannot be empty");	return;  }
 
 	console_ptr->clean_rect(0, 0, 128, 5);
-	login.push_back(0);
+	console_ptr->label(L"alias", alias.data(), 0, 6);
+
+	ask(L"login", login);
+	if (login.size() == 0) { error(L"the login cann't be empty"); return; }
+
+	console_ptr->clean_rect(0, 0, 128, 5);
 	console_ptr->label(L"login", login.data(), 0, 7);
 
 	// 3 time for entering password
@@ -236,33 +421,36 @@ void PasswordManager::save_password()
 		 {
 			 std::wstringstream ss;
 			 ss << time << " times left";
-			 console_ptr->clean_rect(0, 2, 123, 3);
-			 console_ptr->message_box(ss.str().c_str(), 0, 2, Console::CODES::ERR, NULL);
-			 console_ptr->wait_key();
+			 error(ss.str().c_str());
 		 }
-
 	}
 
 	if (code == Console::CODES::OK)
 	{
 		uint32_t& nor = header_ptr->num_of_records;
 
-		if (nor == records.size())
+		if (nor == passwords.size())
 		{
-			Bottleneck lock(records);
+			{
+				Bottleneck lock(passwords);
+				passwords.resize(nor * 2);
+			}
 			records.resize(nor * 2);
 		}
 		
 		{
-			Bottleneck lock(records, confirm_buffer);
-			std::memcpy(records[nor].name, name.data(), NAME_MAX * sizeof(wchar_t));
-			std::memcpy(records[nor].login, login.data(), LOGIN_MAX * sizeof(wchar_t));
-			std::memcpy(records[nor].password, confirm_buffer.data(), PASSWORD_MAX * sizeof(wchar_t));
+			Bottleneck lock(passwords, confirm_buffer);
+			std::memcpy(passwords[nor].login, login.data(), USER_INFO_LIMIT * sizeof(wchar_t));
+			std::memcpy(passwords[nor].password, confirm_buffer.data(), PASSWORD_MAX * sizeof(wchar_t));
 		}
-		EmergencyRemoval(confirm_buffer, primary_buffer);
-		console_ptr->message_box(L"success. press any key", 0, 2, Console::CODES::OK, NULL);
-		console_ptr->wait_key();
+		std::memcpy(records[nor].name, alias.data(), USER_INFO_LIMIT * sizeof(wchar_t));
+		
+		std::array<wchar_t, USER_INFO_LIMIT> tmp_array;
+		std::copy(alias.begin(), alias.end(), tmp_array.begin());
+		console_ptr->update_presumer(tmp_array);
 
+		EmergencyRemoval(confirm_buffer, primary_buffer);
+		success(L"success. press any key");
 		nor++;
 	}
 	
@@ -311,7 +499,7 @@ void PasswordManager::keygen(SafeVector<unsigned char>& secret_key)
 
 	if (result != 0)
 	{
-		EmergencyRemoval(master_password, secret_key, records);
+		EmergencyRemoval(master_password, secret_key, passwords);
 		throw std::runtime_error("Out of memory during key derivation");
 	}
 }
@@ -319,8 +507,7 @@ void PasswordManager::keygen(SafeVector<unsigned char>& secret_key)
 void PasswordManager::encode_file()
 {
 	SafeVector<unsigned char> secret_key = CreateSafeVector<unsigned char>(crypto_secretbox_KEYBYTES);
-	std::vector<unsigned char> 
-		ciphertext(crypto_secretbox_MACBYTES + (header_ptr->num_of_records * sizeof(Record)));
+	std::vector<unsigned char> ciphertext(crypto_secretbox_MACBYTES + (header_ptr->num_of_records * sizeof(Password)));
 
 	randombytes_buf(header_ptr->nonce, 	crypto_secretbox_NONCEBYTES);
 
@@ -328,18 +515,18 @@ void PasswordManager::encode_file()
 
 	int result = 0;
 	{
-		Bottleneck lock(records, secret_key);
+		Bottleneck lock(passwords, secret_key);
 		result = crypto_secretbox_easy(
 			ciphertext.data(),
-			reinterpret_cast<const unsigned char*>(records.data()),
-			header_ptr->num_of_records * sizeof(Record),
+			reinterpret_cast<const unsigned char*>(passwords.data()),
+			header_ptr->num_of_records * sizeof(Password),
 			header_ptr->nonce,
 			secret_key.data());
 	}
 
 	if (result != 0) 
 	{
-		EmergencyRemoval(master_password, secret_key, records);
+		EmergencyRemoval(master_password, secret_key, passwords);
 		throw std::runtime_error("Error during encoding");
 	}
 
@@ -358,10 +545,10 @@ uint32_t PasswordManager::decode_file()
 	int result;
 
 	{
-		Bottleneck lock(records, secret_key);
-		records.resize(header_ptr->num_of_records);
+		Bottleneck lock(passwords, secret_key);
+		passwords.resize(header_ptr->num_of_records);
 		result = crypto_secretbox_open_easy(
-			reinterpret_cast<unsigned char*>(records.data()),
+			reinterpret_cast<unsigned char*>(passwords.data()),
 			ciphertext.data(),
 			ciphertext.size(),
 			header_ptr->nonce,
@@ -376,6 +563,7 @@ void PasswordManager::dump(const std::vector<unsigned char>& ciphertext) const
 {
 	std::ofstream out(data_file.c_str(), std::ios::binary | std::ios::trunc);
 	out.write(reinterpret_cast<const char*>(header_ptr.get()), sizeof(Header));
+	out.write(reinterpret_cast<const char*>(records.data()), header_ptr->num_of_records * sizeof(Record));
 	out.write(reinterpret_cast<const char*>(ciphertext.data()), ciphertext.size());
 	out.close();
 }
@@ -384,12 +572,16 @@ void PasswordManager::download(std::vector<unsigned char>& ciphertext)
 {
 	std::ifstream in(data_file.c_str(), std::ios::binary | std::ios::ate);
 
-	size_t size = static_cast<size_t>(in.tellg()) - sizeof(Header);
-	ciphertext.resize(size);
+	size_t size = static_cast<size_t>(in.tellg());
 	in.seekg(0, std::ios::beg);
 
 	in.read(reinterpret_cast<char*>(header_ptr.get()), sizeof(Header));
-	in.read(reinterpret_cast<char*>(ciphertext.data()), size);
 
+	records.resize(header_ptr->num_of_records);
+	in.read(reinterpret_cast<char*>(records.data()), sizeof(Record) * header_ptr->num_of_records);
+
+	size -= (sizeof(Header) + (sizeof(Record) * header_ptr->num_of_records));
+	ciphertext.resize(size);
+	in.read(reinterpret_cast<char*>(ciphertext.data()), size);
 	in.close();
 }

@@ -3,16 +3,19 @@
 #include <windows.h>
 #include <conio.h>
 #include <vector>
-#include <Lmcons.h>
 #include <cwchar>
 #include <array>
 #include <ctime>
+#include <chrono>
+#include <thread>
 
 #include "GuardAllocator.hpp"
 #include "Presumer.hpp"
 
 
+constexpr size_t BAR_SIZE = 32;
 constexpr size_t RUNIC_ALPH = 88;
+
 constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 {
 	std::array<wchar_t, RUNIC_ALPH> data = {};
@@ -24,6 +27,7 @@ constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 }
 constexpr std::array<wchar_t, RUNIC_ALPH> runic = init_runic();
 
+
 class Console
 {
 private:
@@ -32,29 +36,62 @@ private:
 	std::unique_ptr<Presumer> presumer;
 	std::wstring user_name;
 
-	DWORD read_textbox(std::vector<wchar_t>& buffer)
+	void read_textbox(std::vector<wchar_t>& buffer)
 	{
-		DWORD character_read = 0;
-		BOOL success = ReadConsoleW(
-			hInput,              
-			buffer.data(),        
-			buffer.capacity(),   
-			&character_read,
-			NULL);
+		DWORD mode, new_mode;
+		GetConsoleMode(hInput, &mode);
+		new_mode = mode & ~(ENABLE_LINE_INPUT);
+		SetConsoleMode(hInput, new_mode);
 
-		if (success && character_read == 0)
+		DWORD read = 0, written = 0;
+		wchar_t ch;
+
+		while (true)
 		{
-			throw std::runtime_error("listen_textbox: success && charactersRead == 0");
-		}
-		
-		buffer[character_read - 1] = L'\0';
-		buffer[character_read - 2] = L'\0';
+			written = 0;
+			if (ReadConsoleW(hInput, &ch, 1, &read, NULL))
+			{
+				if (ch == ENTER)
+				{
+					break;
+				}
+				else if (ch == TAB && buffer.size() > 0)
+				{
+					size_t old = buffer.size();
+					presumer->assume(buffer);
+					if (old != buffer.size())
+					{
+						if (!WriteConsoleW(
+							hConsole,
+							&buffer.data()[old],
+							buffer.size() - old,
+							&written,
+							NULL))
+						{
+							throw std::runtime_error("read_textbox: !WriteConsoleW(...)");
+						}
+					}
+				}
+				else if (ch == BACKSPACE && buffer.size() > 0)
+				{
+					WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
+					buffer.pop_back();
+				}
+				else if (ch >= WHITESPACE && buffer.size() < USER_INFO_LIMIT - 1)
+				{
+					buffer.push_back(ch);
+					WriteConsoleW(hConsole, &ch, 1, NULL, NULL);
+				}
 
-		return character_read;
-		
+			}
+		}
+
+		if (buffer.size() > 0) buffer.push_back(L'\0');
+
+		SetConsoleMode(hInput, mode);
 	}
 
-	DWORD read_password(SafeVector<wchar_t>& buffer)
+	void read_password(SafeVector<wchar_t>& buffer)
 	{
 		DWORD mode;
 		GetConsoleMode(hInput, &mode);
@@ -86,10 +123,11 @@ private:
 					{
 						Bottleneck lock(buffer);
 						buffer[pos] = 0;
+						buffer.pop_back();
 					}
 					WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
 				}
-				else if (ch >= 32 && pos < buffer.capacity())
+				else if (ch >= WHITESPACE && pos < PASSWORD_MAX)
 				{ 
 					{
 						Bottleneck lock(buffer);
@@ -107,7 +145,6 @@ private:
 		}
 
 		SetConsoleMode(hInput, mode);
-		return pos;
 	}
 
 	void clear_input_buffer() 
@@ -166,7 +203,15 @@ private:
 
 public:
 	static enum CODES {OK=200, ERR=403};
-	static enum Keybord { ENTER = 13, BACKSPACE = 8, UP = 72, DOWN = 80, LEFT=75, RIGHT=77 };
+	static enum Keybord {
+		ENTER = 0x0d,
+		BACKSPACE = 0x08,
+		TAB = 0x09,
+		WHITESPACE = 0x20,
+		UP = 72, 
+		DOWN = 80,
+		LEFT = 75,
+		RIGHT = 77 };
 
 	Console()
 	{
@@ -177,32 +222,73 @@ public:
 		srand(time(NULL));
 	}
 
-	void init_presumer(std::vector<std::vector<wchar_t>>& data)
+	void update_presumer(std::array<wchar_t, USER_INFO_LIMIT>& data)
 	{
-		presumer->enter_data(data);
-	}
-
-	template <typename VType>
-	void update_presumer(std::vector<VType>& data)
-	{
-		if (std::is_same_v<typename (data)::value_type, wchar_t>)
-		{
-			presumer->add(data);
-
-		}
-
-		if (std::is_same_v<typename (data)::value_type, std::vector<wchar_t>>)
-		{
-			presumer->enter_data(word);
-		}
-		
-		throw std::runtime_error("update_presumer: incorrect vector type");
-
+		presumer->add(data);
 	}
 
 	void wait_key()
 	{
 		wchar_t ch = _getwch();
+	}
+
+	void wait_progress_bar(
+		const wchar_t* message,
+		size_t bar_size,
+		std::chrono::milliseconds ms,
+		uint32_t x, uint32_t y)
+	{
+		wchar_t bar_piece = L'━';
+		DWORD written = 0;
+		COORD start_coord = { static_cast<SHORT>(x), static_cast<SHORT>(y) };
+		std::array<WORD, 6> colors =
+		{
+			FOREGROUND_RED,
+			FOREGROUND_RED | FOREGROUND_INTENSITY,
+			FOREGROUND_RED | FOREGROUND_GREEN,
+			FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+			FOREGROUND_GREEN,
+			FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+		};
+
+		CONSOLE_CURSOR_INFO cci;
+		GetConsoleCursorInfo(hConsole, &cci);
+		cci.bVisible = false;
+		SetConsoleCursorInfo(hConsole, &cci); 
+
+		size_t length = std::wcslen(message);
+		if (length % 2 != bar_size % 2)
+		{
+			bar_size += 1;
+		}
+
+		size_t text_start = (bar_size - length) / 2;
+		size_t step = (bar_size + colors.size() - 1) / colors.size();
+
+		auto tick = ms / bar_size;
+		COORD text_place = { start_coord.X + static_cast<SHORT>(text_start) , start_coord.Y};
+		SetConsoleCursorPosition(hConsole, text_place);
+		WriteConsoleW(hConsole, message, length, &written, NULL);
+		SetConsoleCursorPosition(hConsole, start_coord);
+
+		for (size_t i = 0; i < bar_size; i++)
+		{
+			SetConsoleCursorPosition(hConsole, start_coord);
+			FillConsoleOutputAttribute(hConsole, colors[i / step], bar_size, start_coord, &written);
+
+			if (i < text_start - 1 || i > text_start + length)
+			{
+				COORD current_coord = { start_coord.X + static_cast<SHORT>(i), start_coord.Y };
+				SetConsoleCursorPosition(hConsole, current_coord);
+				WriteConsoleW(hConsole, &bar_piece, 1, &written, NULL);
+			}
+
+			std::this_thread::sleep_for(tick);
+		}
+
+		cci.bVisible = true;
+		SetConsoleCursorInfo(hConsole, &cci);
+		SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
 	}
 
 	void clean_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
@@ -217,9 +303,9 @@ public:
 			}
 		}
 
-		COORD bufferSize = { (WORD)w, (WORD)h };
+		COORD bufferSize = { (SHORT)w, (SHORT)h };
 		COORD bufferCoord = { 0, 0 };
-		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
+		SMALL_RECT writeRegion = { (SHORT)x, (SHORT)y, (SHORT)(x + w - 1), (SHORT)(y + h - 1) };
 
 		WriteConsoleOutputW(hConsole, buffer.data(), bufferSize, bufferCoord, &writeRegion);
 	}
@@ -246,7 +332,7 @@ public:
 	└-$
 	*/
 	template <typename TAlloc>
-	DWORD interact(const wchar_t* message, 
+	void interact(const wchar_t* message, 
 		uint32_t x,
 		uint32_t y, 
 		std::vector<wchar_t, TAlloc>& pass_buffer)
@@ -302,11 +388,11 @@ public:
 
 		if constexpr (std::is_same_v<TAlloc, GuardAllocator<wchar_t>>)
 		{
-			return read_password(pass_buffer);
+			read_password(pass_buffer);
 		}
 		else
 		{
-			return read_textbox(pass_buffer);
+			read_textbox(pass_buffer);
 		}
 	}
 
@@ -456,5 +542,15 @@ public:
 		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
 
 		WriteConsoleOutputW(hConsole, hBuffer.data(), bufferSize, bufferCoord, &writeRegion);
+	}
+
+	void text(const wchar_t* text, uint32_t x, uint32_t y)
+	{
+		COORD coord = { static_cast<SHORT>(x), static_cast<SHORT>(y) };
+		DWORD written;
+		DWORD length = std::wcslen(text);
+		SetConsoleCursorPosition(hConsole, coord);
+		WriteConsoleW(hConsole, text, length, &written, NULL);
+
 	}
 };

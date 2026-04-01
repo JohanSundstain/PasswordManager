@@ -1,9 +1,10 @@
 #pragma once 
 #include <vector>
 #include <iostream>
-#include <string>
+#include <array>
 #include <algorithm>
 
+#include "PasswordManager.h"
 // TODO: Добавить удаление
 
 class Presumer
@@ -15,14 +16,7 @@ private:
 		wchar_t ch;
 
 		node(wchar_t ch) : ch(ch) {};
-		~node() {
-			for (node* n : childs)
-			{
-				std::wcout << L"deleted " << n->ch << std::endl;
-				delete n;
-			}
-				
-		}
+		~node() { for (node* n : childs)delete n; }
 		node(const node&) = delete;
 		node& operator=(const node&) = delete;
 	};
@@ -33,16 +27,9 @@ public:
 
 	Presumer()
 	{
+		std::array<int, 20> s;
 		root_uptr = nullptr;
 		current_ptr = nullptr;
-	}
-
-	void enter_data(std::vector<std::vector<wchar_t>>& data)
-	{
-		for (size_t i = 0; i < data.size(); i++)
-		{
-			add(data[i]);
-		}
 	}
 
 	void assume(std::vector<wchar_t>& key)
@@ -83,17 +70,23 @@ public:
 		}
 	}
 
-	void add(std::vector<wchar_t>& key)
+	void add(std::array<wchar_t, USER_INFO_LIMIT>& key)
 	{
 		if (root_uptr == nullptr)
 		{
-			root_uptr = std::make_unique<node>(L'\0');
+			root_uptr = std::make_unique<node>(0x08);
 		}
 		current_ptr = root_uptr.get();
 		
 		for (size_t i = 0; i < key.size(); i++)
 		{
 			wchar_t c = key[i];
+
+			if (c == L'\0')
+			{
+				break;
+			}
+
 			auto it = std::find_if(
 				current_ptr->childs.begin(), 
 				current_ptr->childs.end(),
