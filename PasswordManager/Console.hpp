@@ -9,12 +9,10 @@
 #include <ctime>
 
 #include "GuardAllocator.hpp"
+#include "Presumer.hpp"
 
-const wchar_t characters[] = L"!\"#$%&\'()*+,-./:;<=>?@[\\]^_{|}~`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 constexpr size_t RUNIC_ALPH = 88;
-constexpr size_t ASCII_ALPH = (sizeof(characters) / sizeof(wchar_t)) - 1;
-
 constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 {
 	std::array<wchar_t, RUNIC_ALPH> data = {};
@@ -24,7 +22,6 @@ constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 	}
 	return data;
 }
-
 constexpr std::array<wchar_t, RUNIC_ALPH> runic = init_runic();
 
 class Console
@@ -32,6 +29,7 @@ class Console
 private:
 
 	HANDLE hConsole, hInput;
+	std::unique_ptr<Presumer> presumer;
 	std::wstring user_name;
 
 	DWORD read_textbox(std::vector<wchar_t>& buffer)
@@ -56,7 +54,7 @@ private:
 		
 	}
 
-	DWORD read_password(std::vector<wchar_t, GuardAllocator<wchar_t>>& buffer)
+	DWORD read_password(SafeVector<wchar_t>& buffer)
 	{
 		DWORD mode;
 		GetConsoleMode(hInput, &mode);
@@ -91,7 +89,7 @@ private:
 					}
 					WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
 				}
-				else if (ch >= 32 && pos < buffer.capacity() - 1)
+				else if (ch >= 32 && pos < buffer.capacity())
 				{ 
 					{
 						Bottleneck lock(buffer);
@@ -164,7 +162,6 @@ private:
 			return { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y };
 		}
 		else return { 0, 0 };
-		
 	}
 
 public:
@@ -175,7 +172,32 @@ public:
 	{
 		hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 		hInput = GetStdHandle(STD_INPUT_HANDLE);
+		presumer = std::make_unique<Presumer>();
+
 		srand(time(NULL));
+	}
+
+	void init_presumer(std::vector<std::vector<wchar_t>>& data)
+	{
+		presumer->enter_data(data);
+	}
+
+	template <typename VType>
+	void update_presumer(std::vector<VType>& data)
+	{
+		if (std::is_same_v<typename (data)::value_type, wchar_t>)
+		{
+			presumer->add(data);
+
+		}
+
+		if (std::is_same_v<typename (data)::value_type, std::vector<wchar_t>>)
+		{
+			presumer->enter_data(word);
+		}
+		
+		throw std::runtime_error("update_presumer: incorrect vector type");
+
 	}
 
 	void wait_key()
@@ -218,7 +240,6 @@ public:
 			SetConsoleCursorPosition(hConsole, coord);
 		}
 	}
-
 
 	/*
 	┌──(message):
@@ -355,7 +376,7 @@ public:
 
 	}
 
-	uint32_t menu(std::vector<std::wstring> options)
+	uint32_t menu(std::vector<std::wstring>& options)
 	{
 		clean();
 		std::vector<HANDLE> buffers;

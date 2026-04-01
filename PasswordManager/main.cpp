@@ -3,7 +3,6 @@
 
 int main()
 {
-  
     PasswordManager pm;
     pm.run();
 

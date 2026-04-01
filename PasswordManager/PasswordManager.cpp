@@ -22,36 +22,22 @@ PasswordManager::PasswordManager()
 	header_ptr = std::make_unique<Header>();
 	console_ptr = std::make_unique<Console>();
 
-	master_password.reserve(128);
-	master_password.get_allocator().lock(master_password.data(), master_password.capacity());
-
-	secret_key.resize(crypto_secretbox_KEYBYTES);
-	secret_key.get_allocator().lock(secret_key.data(), secret_key.capacity());
-
-	records.resize(5);
-	records.get_allocator().lock(records.data(), records.capacity());
-
-	primary_buffer.reserve(128);
-	primary_buffer.get_allocator().lock(primary_buffer.data(), primary_buffer.capacity());
-
-	confirmation_buffer.reserve(128);
-	confirmation_buffer.get_allocator().lock(confirmation_buffer.data(), confirmation_buffer.capacity());
+	records = CreateSafeVector<Record>(MIN_RECORD);
+	master_password = CreateSafeVector<wchar_t>(PASSWORD_MAX);
 
 	state = States::LAUNCH;
 };
 
 PasswordManager::~PasswordManager()
 {
-	EmergencyRemoval(master_password, secret_key, records, primary_buffer, confirmation_buffer);
-
-	master_password.get_allocator().unlock(master_password.data(), master_password.capacity());
-	secret_key.get_allocator().unlock(secret_key.data(), secret_key.capacity());
-	records.get_allocator().unlock(records.data(), records.capacity());
-	primary_buffer.get_allocator().unlock(primary_buffer.data(), primary_buffer.capacity());
-	confirmation_buffer.get_allocator().unlock(confirmation_buffer.data(), confirmation_buffer.capacity());
+	EmergencyRemoval(master_password, records);
 };
 
-uint32_t PasswordManager::confirm_password(const wchar_t* message,bool check_length)
+uint32_t PasswordManager::confirm_password(
+	const wchar_t* message,
+	SafeVector<wchar_t>& primary_buffer,
+	SafeVector<wchar_t>& confirmation_buffer,
+	bool check_length)
 {
 	console_ptr->clean_rect(0, 0, 128, 5);
 	{
@@ -110,27 +96,36 @@ void PasswordManager::launch()
 
 void PasswordManager::sign_up()
 {
-	uint32_t code = confirm_password(L"create a master password", true);
+	SafeVector<wchar_t> primary_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+	SafeVector<wchar_t> confirm_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+
+	uint32_t code = confirm_password(L"create a master password", primary_buffer, confirm_buffer, true);
 	
 	if (code == Console::CODES::OK)
 	{
 		{
-			Bottleneck lock(master_password, confirmation_buffer);
+			Bottleneck lock(master_password);
 			master_password.clear();
-			master_password.resize(confirmation_buffer.size());
+			master_password.resize(confirm_buffer.size());
+		}
+
+		{
+			Bottleneck lock(master_password, confirm_buffer);
 			std::memcpy(master_password.data(),
-				confirmation_buffer.data(),
-				confirmation_buffer.size() * sizeof(wchar_t));
+				confirm_buffer.data(),
+				confirm_buffer.size() * sizeof(wchar_t));
 		}
 		state = States::MENU;
 	}
 
-	EmergencyRemoval(primary_buffer, confirmation_buffer);
+	EmergencyRemoval(primary_buffer, confirm_buffer);
 }
 
 void PasswordManager::sign_in()
 {
 	console_ptr->clean_rect(0, 0, 128, 5);
+
+	if (master_password.size() > 0)
 	{
 		Bottleneck lock(master_password);
 		std::fill(master_password.begin(), master_password.end(), 0);
@@ -159,7 +154,7 @@ void PasswordManager::exit()
 {
 	state = States::END;
 	encode_file();
-	EmergencyRemoval(master_password, secret_key, records, primary_buffer, confirmation_buffer);
+	EmergencyRemoval(master_password, records);
 }
 
 void PasswordManager::menu()
@@ -183,6 +178,12 @@ void PasswordManager::menu()
 	{
 		state = States::EXIT;
 	}
+
+}
+
+
+void PasswordManager::find_password()
+{
 
 }
 
@@ -224,9 +225,12 @@ void PasswordManager::save_password()
 
 	// 3 time for entering password
 	uint32_t code;
+	SafeVector<wchar_t> primary_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+	SafeVector<wchar_t> confirm_buffer = CreateSafeVector<wchar_t>(PASSWORD_MAX);
+
 	for (int time = 3; time >= 0; time--)
 	{
-		 code = confirm_password(L"password", false);
+		 code = confirm_password(L"password", primary_buffer, confirm_buffer, false);
 		 if (code == Console::CODES::OK) break;
 		 else
 		 {
@@ -250,12 +254,12 @@ void PasswordManager::save_password()
 		}
 		
 		{
-			Bottleneck lock(records, confirmation_buffer);
+			Bottleneck lock(records, confirm_buffer);
 			std::memcpy(records[nor].name, name.data(), NAME_MAX * sizeof(wchar_t));
 			std::memcpy(records[nor].login, login.data(), LOGIN_MAX * sizeof(wchar_t));
-			std::memcpy(records[nor].password, confirmation_buffer.data(), PASSWORD_MAX * sizeof(wchar_t));
+			std::memcpy(records[nor].password, confirm_buffer.data(), PASSWORD_MAX * sizeof(wchar_t));
 		}
-		EmergencyRemoval(confirmation_buffer, primary_buffer);
+		EmergencyRemoval(confirm_buffer, primary_buffer);
 		console_ptr->message_box(L"success. press any key", 0, 2, Console::CODES::OK, NULL);
 		console_ptr->wait_key();
 
@@ -273,8 +277,7 @@ void PasswordManager::state_machine()
 	case States::SIGN_IN:		sign_in(); break;
 	case States::SIGN_UP:		sign_up(); break;
 	case States::SAVE_PASSWORD: save_password(); break;
-
-		// TODO: Добавить выход в меню
+	case States::FIND_PASSWORD: find_password(); break;
 	case States::MENU:			menu(); break;
 	case States::EXIT:			exit();  break;
 	default: break;
@@ -290,7 +293,7 @@ void PasswordManager::run()
 	console_ptr->clean();
 }
 
-void PasswordManager::keygen()
+void PasswordManager::keygen(SafeVector<unsigned char>& secret_key)
 {
 	int result = 0;
 	{
@@ -308,17 +311,20 @@ void PasswordManager::keygen()
 
 	if (result != 0)
 	{
-		EmergencyRemoval(master_password, secret_key, records, primary_buffer, confirmation_buffer);
+		EmergencyRemoval(master_password, secret_key, records);
 		throw std::runtime_error("Out of memory during key derivation");
 	}
 }
 
 void PasswordManager::encode_file()
 {
-	std::vector<unsigned char> ciphertext(crypto_secretbox_MACBYTES + (header_ptr->num_of_records * sizeof(Record)));
+	SafeVector<unsigned char> secret_key = CreateSafeVector<unsigned char>(crypto_secretbox_KEYBYTES);
+	std::vector<unsigned char> 
+		ciphertext(crypto_secretbox_MACBYTES + (header_ptr->num_of_records * sizeof(Record)));
+
 	randombytes_buf(header_ptr->nonce, 	crypto_secretbox_NONCEBYTES);
 
-	keygen();
+	keygen(secret_key);
 
 	int result = 0;
 	{
@@ -333,7 +339,7 @@ void PasswordManager::encode_file()
 
 	if (result != 0) 
 	{
-		EmergencyRemoval(master_password, secret_key, records, primary_buffer, confirmation_buffer);
+		EmergencyRemoval(master_password, secret_key, records);
 		throw std::runtime_error("Error during encoding");
 	}
 
@@ -343,10 +349,11 @@ void PasswordManager::encode_file()
 uint32_t PasswordManager::decode_file()
 {
 	std::vector<unsigned char> ciphertext;
+	SafeVector<unsigned char> secret_key = CreateSafeVector<unsigned char>(crypto_secretbox_KEYBYTES);
 
 	download(ciphertext);
 
-	keygen();
+	keygen(secret_key);
 
 	int result;
 

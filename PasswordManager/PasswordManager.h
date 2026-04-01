@@ -12,6 +12,7 @@
 #define NAME_MAX 32
 #define LOGIN_MAX 128
 #define PASSWORD_MAX 128
+#define MIN_RECORD 5
 
 enum class States {
 	LAUNCH,
@@ -43,25 +44,25 @@ struct Header
 class PasswordManager
 {
 private:
+
 	std::unique_ptr<Header> header_ptr;
 	std::unique_ptr<Console> console_ptr;
-	std::vector<Record, GuardAllocator<Record>> records;
-	std::vector<unsigned char, GuardAllocator<unsigned char>> secret_key;
-	std::vector<wchar_t, GuardAllocator<wchar_t>> master_password;
-	std::vector<wchar_t, GuardAllocator<wchar_t>> primary_buffer;
-	std::vector<wchar_t, GuardAllocator<wchar_t>> confirmation_buffer;
+
+	SafeVector<Record> records;
+	SafeVector<wchar_t> master_password;
 	
 	States state;
-
 	const std::string data_file = "data.encoded";
 
 	void encode_file();
 
 	uint32_t decode_file();
 
+	uint32_t confirm_password(const wchar_t*, SafeVector<wchar_t>&, SafeVector<wchar_t>&, bool);
+
 	// TODO: DELETE
 	template <typename T>
-	void memory_view(std::vector<T, GuardAllocator<T>>& password)
+	void memory_view(SafeVector<T>& password)
 	{
 		{
 			COORD pos = { (WORD)0, (WORD)7 };
@@ -79,18 +80,9 @@ private:
 		}
 	}
 
-	uint32_t confirm_password(const wchar_t*, bool);
-
-public:
-	PasswordManager();
-
-	~PasswordManager();
-
-	void run();
+	void keygen(SafeVector<unsigned char>&);
 
 	void state_machine();
-
-	void keygen();
 
 	void dump(const std::vector<unsigned char>&) const;
 
@@ -110,5 +102,11 @@ public:
 	void find_password();
 
 	void exit();
-	
+
+public:
+	PasswordManager();
+
+	~PasswordManager();
+
+	void run();
 };
