@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <sstream>
 #include <chrono>
+#include <fcntl.h>
+#include <io.h>    
 
 #include "PasswordManager.h"
 #include "GuardAllocator.hpp"
@@ -22,6 +24,9 @@ PasswordManager::PasswordManager()
 	{
 		throw std::runtime_error("PasswordManager: sodium_init() < 0\n");
 	}
+	SetConsoleCP(65001);
+	SetConsoleOutputCP(65001);
+
 	header_ptr = std::make_unique<Header>();
 	console_ptr = std::make_unique<Console>();
 
@@ -117,11 +122,13 @@ void PasswordManager::success(const wchar_t* message)
 void PasswordManager::progress_bar(const wchar_t* message,std::chrono::milliseconds)
 {
 	console_ptr->clean();
-	console_ptr->wait_progress_bar(message, 32, 500ms, 2, 2);	
+	console_ptr->wait_progress_bar(message, 32, 500ms, 1, 1);	
 }
 
 void PasswordManager::launch()
 {
+	progress_bar(LOGO, 500ms);
+
 	if (!fs::exists(data_file.c_str()))
 	{
 		state = States::SIGN_UP;
@@ -397,16 +404,19 @@ void PasswordManager::save_password()
 	login.reserve(USER_INFO_LIMIT);
 
 	ask(L"alias", alias);
-	if (alias.size() == 0) { error(L"the alias cannot be empty");	return;  }
-
-	console_ptr->clean_rect(0, 0, 128, 5);
-	console_ptr->label(L"alias", alias.data(), 0, 6);
+	if (alias.size() == 0) 
+	{ 
+		error(L"the alias cannot be empty"); 
+		state = States::MENU; 
+		return;
+	}
 
 	ask(L"login", login);
-	if (login.size() == 0) { error(L"the login cann't be empty"); return; }
-
-	console_ptr->clean_rect(0, 0, 128, 5);
-	console_ptr->label(L"login", login.data(), 0, 7);
+	if (login.size() == 0) 
+	{ 
+		error(L"the login cann't be empty"); 
+		return; 
+	}
 
 	// 3 time for entering password
 	uint32_t code;

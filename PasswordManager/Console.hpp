@@ -8,6 +8,7 @@
 #include <ctime>
 #include <chrono>
 #include <thread>
+#include <format>
 
 #include "GuardAllocator.hpp"
 #include "Presumer.hpp"
@@ -15,6 +16,8 @@
 
 constexpr size_t BAR_SIZE = 32;
 constexpr size_t RUNIC_ALPH = 88;
+constexpr wchar_t LOGO[7] = L"⛨ PASS";
+
 
 constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 {
@@ -27,6 +30,7 @@ constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
 }
 constexpr std::array<wchar_t, RUNIC_ALPH> runic = init_runic();
 
+using namespace std::chrono_literals;
 
 class Console
 {
@@ -72,15 +76,20 @@ private:
 						}
 					}
 				}
-				else if (ch == BACKSPACE && buffer.size() > 0)
+				else if (ch == BACKSPACE)
 				{
-					WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
-					buffer.pop_back();
+					if (buffer.size() > 0)
+					{
+						WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
+						buffer.pop_back();
+					}
+					auto_hint(buffer, 0, 2, 5);
 				}
 				else if (ch >= WHITESPACE && buffer.size() < USER_INFO_LIMIT - 1)
 				{
 					buffer.push_back(ch);
 					WriteConsoleW(hConsole, &ch, 1, NULL, NULL);
+					auto_hint(buffer, 0, 2, 5);
 				}
 
 			}
@@ -101,7 +110,7 @@ private:
 		DWORD pos = 0;
 		bool finished = false;
 
-		while (!finished) 
+		while (!finished)
 		{
 			DWORD count;
 			INPUT_RECORD record;
@@ -112,7 +121,7 @@ private:
 				wchar_t ch = record.Event.KeyEvent.uChar.UnicodeChar;
 				WORD vk = record.Event.KeyEvent.wVirtualKeyCode;
 
-				if (vk == VK_RETURN) 
+				if (vk == VK_RETURN)
 				{
 					finished = true;
 					WriteConsoleW(hConsole, L"\n", 1, NULL, NULL);
@@ -128,13 +137,13 @@ private:
 					WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
 				}
 				else if (ch >= WHITESPACE && pos < PASSWORD_MAX)
-				{ 
+				{
 					{
 						Bottleneck lock(buffer);
 						buffer.push_back(ch);
 					}
 					pos++;
-					WriteConsoleW(hConsole, &runic[rand()%RUNIC_ALPH], 1, NULL, NULL);
+					WriteConsoleW(hConsole, &runic[rand() % RUNIC_ALPH], 1, NULL, NULL);
 				}
 			}
 		}
@@ -147,10 +156,26 @@ private:
 		SetConsoleMode(hInput, mode);
 	}
 
-	void clear_input_buffer() 
+	void clear_input_buffer()
 	{
 		wchar_t c;
 		while (_kbhit()) { c = _getwch(); }
+	}
+
+	void enable_cursor(HANDLE handler)
+	{
+		CONSOLE_CURSOR_INFO cci;
+		GetConsoleCursorInfo(handler, &cci);
+		cci.bVisible = true;
+		SetConsoleCursorInfo(handler, &cci);
+	}
+
+	void disable_cursor(HANDLE handler)
+	{
+		CONSOLE_CURSOR_INFO cci;
+		GetConsoleCursorInfo(handler, &cci);
+		cci.bVisible = false;
+		SetConsoleCursorInfo(handler, &cci);
 	}
 
 	void listen_menu(uint32_t& option, std::vector<HANDLE>& buffers)
@@ -170,19 +195,19 @@ private:
 
 					switch (pushed_key)
 					{
-						case UP:
-						{
-							option = option == 0 ? buffers.size()-1 : option - 1;
-							SetConsoleActiveScreenBuffer(buffers[option]);
-							break;
-						} 
-						case DOWN:
-						{
-							option = option == buffers.size() - 1 ? 0 : option + 1;
-							SetConsoleActiveScreenBuffer(buffers[option]);
-							break;
-						}
-						default: break;
+					case UP:
+					{
+						option = option == 0 ? buffers.size() - 1 : option - 1;
+						SetConsoleActiveScreenBuffer(buffers[option]);
+						break;
+					}
+					case DOWN:
+					{
+						option = option == buffers.size() - 1 ? 0 : option + 1;
+						SetConsoleActiveScreenBuffer(buffers[option]);
+						break;
+					}
+					default: break;
 					}
 
 				}
@@ -199,6 +224,67 @@ private:
 			return { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y };
 		}
 		else return { 0, 0 };
+	}
+
+	/*
+	 ⮞ word
+	*/
+	void auto_hint(std::vector<wchar_t>& buffer, uint32_t x, uint32_t y, size_t auto_hint_size)
+	{
+		std::vector<std::wstring> result;
+		presumer->get_matchings(buffer, result);
+
+		size_t w = USER_INFO_LIMIT + 3;
+		size_t h = result.size() < auto_hint_size ? result.size() : auto_hint_size;;
+		clean_rect(x, y, w, auto_hint_size);
+		std::vector<CHAR_INFO> screen_buffer(w * h);
+
+		
+		for (size_t i = 0; i < h; i++)
+		{
+			for (size_t j = 0; j < w; j++)
+			{
+				size_t ind = i * w + j;
+
+				if (j == 0)
+				{
+					screen_buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+					screen_buffer[ind].Char.UnicodeChar = L' ';
+				}
+				else if (j == 1)
+				{
+					screen_buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+					screen_buffer[ind].Char.UnicodeChar = L'⮞';
+				}
+				else if (j == 2)
+				{
+					screen_buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+					screen_buffer[ind].Char.UnicodeChar = L' ';
+				}
+				else
+				{
+					for (size_t l = 0; l < result[i].size(); l++)
+					{
+						screen_buffer[ind + l].Attributes = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED;
+						screen_buffer[ind + l].Char.UnicodeChar = result[i][l];
+					}
+					break;
+				}
+
+			}
+		}
+
+		COORD bufferSize = { static_cast<SHORT>(w), static_cast<SHORT>(h) };
+		COORD bufferCoord = { 0, 0 };
+		SMALL_RECT writeRegion = {
+			static_cast<SHORT>(x),
+			static_cast<SHORT>(y),
+			static_cast<SHORT>(x + w - 1),
+			static_cast<SHORT>(y + h - 1)
+		};
+
+		WriteConsoleOutputW(hConsole, screen_buffer.data(), bufferSize, bufferCoord, &writeRegion);
+
 	}
 
 public:
@@ -251,10 +337,7 @@ public:
 			FOREGROUND_GREEN | FOREGROUND_INTENSITY,
 		};
 
-		CONSOLE_CURSOR_INFO cci;
-		GetConsoleCursorInfo(hConsole, &cci);
-		cci.bVisible = false;
-		SetConsoleCursorInfo(hConsole, &cci); 
+		disable_cursor(hConsole);
 
 		size_t length = std::wcslen(message);
 		if (length % 2 != bar_size % 2)
@@ -286,8 +369,7 @@ public:
 			std::this_thread::sleep_for(tick);
 		}
 
-		cci.bVisible = true;
-		SetConsoleCursorInfo(hConsole, &cci);
+		enable_cursor(hConsole);
 		SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
 	}
 
@@ -328,8 +410,8 @@ public:
 	}
 
 	/*
-	┌──(message):
-	└-$
+	┌──[⛨PASS]~(message):
+	└─$
 	*/
 	template <typename TAlloc>
 	void interact(const wchar_t* message, 
@@ -337,45 +419,65 @@ public:
 		uint32_t y, 
 		std::vector<wchar_t, TAlloc>& pass_buffer)
 	{
-		size_t w = std::wcslen(message) + 6;
-		size_t h = 2;
-
-		clean_rect(x, y, 128, h);
-		std::vector<CHAR_INFO> buffer(w * h);
-
-		buffer[0].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[0].Char.UnicodeChar = L'┌';
-
-		buffer[1].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[1].Char.UnicodeChar = L'─';
-
-		buffer[2].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[2].Char.UnicodeChar = L'─';
+		const wchar_t left[] = L"┌──[";
+		const wchar_t middle[] = L"]~(";
+		const wchar_t right[] = L"):";
+		const wchar_t bottom[] = L"└─$";
 		
-		buffer[3].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[3].Char.UnicodeChar = L'(';
 
-		for (size_t i = 0; i < w - 6; i++)
+		size_t w = 
+			std::wcslen(message) 
+			+ std::wcslen(left) 
+			+ std::wcslen(LOGO)
+			+ std::wcslen(middle)
+			+ std::wcslen(right);
+		size_t h = 2;
+		size_t ind = 0;
+
+		std::vector<CHAR_INFO> buffer(w * h);
+		clean_rect(x, y, PASSWORD_MAX, h);
+
+
+		for (size_t i = 0; i < std::wcslen(left); i++, ind++)
 		{
-			buffer[i + 4].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			buffer[i + 4].Char.UnicodeChar = message[i];
+			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer[ind].Char.UnicodeChar = left[i];
 		}
 
-		buffer[w - 2].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[w - 2].Char.UnicodeChar = L')';
+		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind++)
+		{
+			buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			buffer[ind].Char.UnicodeChar = LOGO[i];
+		}
 
-		buffer[w - 1].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[w - 1].Char.UnicodeChar = L':';
+		for (size_t i = 0; i < std::wcslen(middle); i++, ind++)
+		{
+			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer[ind].Char.UnicodeChar = middle[i];
+		}
 
-		buffer[w].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[w].Char.UnicodeChar = L'└';
+		for (size_t i = 0; i < std::wcslen(message); i++, ind++)
+		{
+			buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			buffer[ind].Char.UnicodeChar = message[i];
+		}
 
-		buffer[w + 1].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-		buffer[w + 1].Char.UnicodeChar = L'─';
-	
-		buffer[w + 2].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-		buffer[w + 2].Char.UnicodeChar = L'$';
+		for (size_t i = 0; i < std::wcslen(right); i++, ind++)
+		{
+			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer[ind].Char.UnicodeChar = right[i];
+		}
+		
+		for (size_t i = 0; i < std::wcslen(bottom); i++, ind++)
+		{
+			if (i == std::wcslen(bottom) - 1)
+			{
+				buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			}
+			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
 
+			buffer[ind].Char.UnicodeChar = bottom[i];
+		}		
 
 		COORD bufferSize = { (WORD)w, (WORD)h };
 		COORD bufferCoord = { 0, 0 };
@@ -402,20 +504,17 @@ public:
 	└─────────┘
 	*/
 	void message_box(const wchar_t* message, 
-		uint32_t x,
-		uint32_t y,
+		uint32_t x, uint32_t y,
 		uint32_t code,
 		HANDLE hBuffer)
 	{
 		if (hBuffer == NULL) hBuffer = hConsole;
 	
-
+		disable_cursor(hBuffer);
 		size_t w = std::wcslen(message) + 2;
 		size_t h = 3;
 		clean_rect(x, y, 128, h);
 		std::vector<CHAR_INFO> buffer(w*h);
-
-		// UP Border
 
 		for (size_t i = 0; i < h; i++)
 		{
@@ -450,7 +549,7 @@ public:
 			}
 			else
 			{
-				buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_BLUE | BACKGROUND_RED;
+				buffer[ind].Attributes = BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_RED | FOREGROUND_INTENSITY ;
 			}
 		}
 
@@ -459,6 +558,7 @@ public:
 		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
 
 		WriteConsoleOutputW(hBuffer, buffer.data(), bufferSize, bufferCoord, &writeRegion);
+		enable_cursor(hBuffer);
 
 	}
 
@@ -466,6 +566,7 @@ public:
 	{
 		clean();
 		std::vector<HANDLE> buffers;
+		CONSOLE_CURSOR_INFO cci;
 
 		for (size_t i = 0; i < options.size(); i++)
 		{
@@ -480,6 +581,7 @@ public:
 				throw std::runtime_error("menu: hBuffer == INVALID_HANDLE_VALUE");
 			}
 
+			disable_cursor(hBuffer);
 			buffers.push_back(hBuffer);
 
 
@@ -504,53 +606,10 @@ public:
 
 		for (size_t i = 0; i < options.size(); i++)
 		{
+			enable_cursor(buffers[i]);
 			CloseHandle(buffers[i]);
 		}
 
 		return option;
-	}
-
-	void label(const wchar_t* name, const wchar_t* text, uint32_t x, uint32_t y)
-	{
-		size_t name_len = std::wcslen(name);
-		size_t text_len = std::wcslen(text);
-		size_t w = name_len + text_len + 2;
-		size_t h = 1;
-
-		clean_rect(x, y, 128, h);
-		std::vector<CHAR_INFO> hBuffer(w);
-
-		for (size_t j = 0; j < name_len; j++)
-		{
-			hBuffer[j].Char.UnicodeChar = name[j];
-		}
-		hBuffer[name_len].Char.UnicodeChar = L':';
-		hBuffer[name_len + 1].Char.UnicodeChar = L' ';
-
-		for (size_t i = 0; i < text_len; i++)
-		{
-			hBuffer[name_len+2+i].Char.UnicodeChar = text[i];
-		}
-
-		for (size_t i = 0; i < w; i++)
-		{
-			hBuffer[i].Attributes = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
-		}
-
-		COORD bufferSize = { (WORD)w, (WORD)h };
-		COORD bufferCoord = { 0, 0 };
-		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
-
-		WriteConsoleOutputW(hConsole, hBuffer.data(), bufferSize, bufferCoord, &writeRegion);
-	}
-
-	void text(const wchar_t* text, uint32_t x, uint32_t y)
-	{
-		COORD coord = { static_cast<SHORT>(x), static_cast<SHORT>(y) };
-		DWORD written;
-		DWORD length = std::wcslen(text);
-		SetConsoleCursorPosition(hConsole, coord);
-		WriteConsoleW(hConsole, text, length, &written, NULL);
-
 	}
 };

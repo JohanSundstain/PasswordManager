@@ -30,8 +30,8 @@ void HookThread()
     UnhookWindowsHookEx(hHook);
 }
 
-int main() {
-    
+int main() 
+{
     PasswordManager pm;
     pm.run();
 
