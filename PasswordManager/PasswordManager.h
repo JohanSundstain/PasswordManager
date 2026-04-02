@@ -3,14 +3,11 @@
 #define PASSWORD_MAX 128
 #define MIN_RECORD 5
 
-
 #include <string>
 #include <vector>
 #include <sodium.h>
 #include <iostream>
 #include <windows.h>
-#include <iomanip> 
-#include <array>
 
 #include "Console.hpp"
 #include "GuardAllocator.hpp"
@@ -67,26 +64,6 @@ private:
 	uint32_t decode_file();
 
 	uint32_t confirm_password(const wchar_t*, SafeVector<wchar_t>&, SafeVector<wchar_t>&, bool);
-
-	// TODO: DELETE
-	template <typename T>
-	void memory_view(SafeVector<T>& password)
-	{
-		{
-			COORD pos = { (WORD)0, (WORD)7 };
-			HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-			SetConsoleCursorPosition(hConsole, pos);
-		
-			std::cout  << std::hex;
-			Bottleneck lock(password);
-			const char* data_ptr = reinterpret_cast<const char*>(password.data());
-			for (size_t i = 0; i < password.capacity() * sizeof(T); i++)
-			{
-				std::cout << std::setfill('0') << std::setw(2) << (uint32_t) data_ptr[i] << " ";
-			}
-			console_ptr->wait_key();
-		}
-	}
 
 	void keygen(SafeVector<unsigned char>&);
 

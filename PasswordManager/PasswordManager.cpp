@@ -7,9 +7,8 @@
 #include <stdexcept>
 #include <filesystem>
 #include <sstream>
+#include <windows.h>
 #include <chrono>
-#include <fcntl.h>
-#include <io.h>    
 
 #include "PasswordManager.h"
 #include "GuardAllocator.hpp"
@@ -277,7 +276,7 @@ void PasswordManager::copy_password(size_t index)
 		CloseClipboard();
 	}
 
-	progress_bar(L"copying", 500ms);
+	progress_bar(L"copying", 2000ms);
 
 	is_copied = false;
 	HGLOBAL hPass = GlobalAlloc(GMEM_MOVEABLE, PASSWORD_MAX * sizeof(wchar_t));
@@ -484,8 +483,14 @@ void PasswordManager::state_machine()
 
 void PasswordManager::run()
 {
+	BOOL isDebuggerPresent = FALSE;
+	CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebuggerPresent);
 	while (state != States::END)
 	{
+		if (isDebuggerPresent)
+		{
+			return;
+		}
 		state_machine();
 	}
 	console_ptr->clean();

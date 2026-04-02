@@ -6,7 +6,6 @@
 #include <stack>
 
 #include "PasswordManager.h"
-// TODO: Добавить удаление
 
 class Presumer
 {
@@ -110,6 +109,10 @@ public:
 
 		std::wstring basic_string(key.begin(), key.end());
 		std::stack<std::pair<node*, std::wstring>> stack;
+		if (current_ptr->is_key)
+		{
+			result.push_back(basic_string);
+		}
 		for (node* child : current_ptr->childs)
 		{
 			stack.push(std::make_pair(child, basic_string));

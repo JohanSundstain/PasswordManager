@@ -8,7 +8,6 @@
 #include <ctime>
 #include <chrono>
 #include <thread>
-#include <format>
 
 #include "GuardAllocator.hpp"
 #include "Presumer.hpp"
@@ -189,7 +188,7 @@ private:
 			{
 				pushed_key = _getwch();
 
-				if (pushed_key == 224 || pushed_key == 0)
+				if (pushed_key == 224)
 				{
 					pushed_key = _getwch();
 
@@ -581,7 +580,6 @@ public:
 				throw std::runtime_error("menu: hBuffer == INVALID_HANDLE_VALUE");
 			}
 
-			disable_cursor(hBuffer);
 			buffers.push_back(hBuffer);
 
 
@@ -606,9 +604,9 @@ public:
 
 		for (size_t i = 0; i < options.size(); i++)
 		{
-			enable_cursor(buffers[i]);
 			CloseHandle(buffers[i]);
 		}
+
 
 		return option;
 	}
