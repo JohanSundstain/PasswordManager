@@ -98,6 +98,8 @@ private:
 
 	void success(const wchar_t*);
 
+	void show_pass(const wchar_t*);
+
 	void progress_bar(const wchar_t* message, std::chrono::milliseconds);
 
 	template <typename TContainer>
@@ -107,34 +109,42 @@ private:
 		console_ptr->interact(message, 0, 0, safe_buffer);
 	}
 
-	inline bool CopyToClipboard(const wchar_t* text, size_t n, HGLOBAL& hMem)
+	inline bool CopyToClipboard(const wchar_t* text)
 	{
-		size_t data_size = sizeof(wchar_t) * n;
+		size_t len = std::wcslen(text) + 1;
+		size_t size = len * sizeof(wchar_t);
 
-		if (hMem)
+		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+		if (!hMem) return false;
+
+		void* pDest = GlobalLock(hMem);
+		if (!pDest)
 		{
-			void* pDest = GlobalLock(hMem);
-			if (pDest)
-			{
-				CopyMemory(pDest, text, data_size);
-				GlobalUnlock(hMem);
-				if (SetClipboardData(CF_UNICODETEXT, hMem) == NULL)
-				{
-					return false;
-				}
-			}
-			else
-			{
-				return false;
-			}
-		}
-		else
-		{
+			GlobalFree(hMem);
 			return false;
 		}
+
+		std::memcpy(pDest, text, size);
+		GlobalUnlock(hMem);
+
+		if (!OpenClipboard(nullptr))
+		{
+			GlobalFree(hMem);
+			return false;
+		}
+
+		EmptyClipboard();
+
+		if (!SetClipboardData(CF_UNICODETEXT, hMem))
+		{
+			CloseClipboard();
+			GlobalFree(hMem);
+			return false;
+		}
+
+		CloseClipboard();
 		return true;
 	}
-
 
 
 public:

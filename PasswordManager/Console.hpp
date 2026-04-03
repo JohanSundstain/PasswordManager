@@ -15,7 +15,7 @@
 
 constexpr size_t BAR_SIZE = 32;
 constexpr size_t RUNIC_ALPH = 88;
-constexpr wchar_t LOGO[7] = L"⛨ PASS";
+const wchar_t LOGO[] = L"⛨ PASS";
 
 
 constexpr std::array<wchar_t, RUNIC_ALPH> init_runic()
@@ -48,6 +48,7 @@ private:
 
 		DWORD read = 0, written = 0;
 		wchar_t ch;
+
 
 		while (true)
 		{
@@ -179,36 +180,34 @@ private:
 
 	void listen_menu(uint32_t& option, std::vector<HANDLE>& buffers)
 	{
-		clear_input_buffer();
-		wchar_t pushed_key = -1;
+		for (auto hCon : buffers)
+		{ 
+			FlushConsoleInputBuffer(hCon);
+		}
 
-		while (pushed_key != ENTER)
+		INPUT_RECORD record;
+		DWORD count;
+
+		while (true)
 		{
-			if (_kbhit())
+			ReadConsoleInput(hInput, &record, 1, &count);
+
+			if (record.EventType == KEY_EVENT && record.Event.KeyEvent.bKeyDown)
 			{
-				pushed_key = _getwch();
-
-				if (pushed_key == 224)
+				switch (record.Event.KeyEvent.wVirtualKeyCode)
 				{
-					pushed_key = _getwch();
+				case VK_UP:
+					option = option == 0 ? buffers.size() - 1 : option - 1;
+					SetConsoleActiveScreenBuffer(buffers[option]);
+					break;
 
-					switch (pushed_key)
-					{
-					case UP:
-					{
-						option = option == 0 ? buffers.size() - 1 : option - 1;
-						SetConsoleActiveScreenBuffer(buffers[option]);
-						break;
-					}
-					case DOWN:
-					{
-						option = option == buffers.size() - 1 ? 0 : option + 1;
-						SetConsoleActiveScreenBuffer(buffers[option]);
-						break;
-					}
-					default: break;
-					}
+				case VK_DOWN:
+					option = option == buffers.size() - 1 ? 0 : option + 1;
+					SetConsoleActiveScreenBuffer(buffers[option]);
+					break;
 
+				case VK_RETURN:
+					return;
 				}
 			}
 		}
@@ -303,8 +302,14 @@ public:
 		hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 		hInput = GetStdHandle(STD_INPUT_HANDLE);
 		presumer = std::make_unique<Presumer>();
+		disable_cursor(hConsole);
 
 		srand(time(NULL));
+	}
+
+	~Console()
+	{
+		enable_cursor(hConsole);
 	}
 
 	void update_presumer(std::array<wchar_t, USER_INFO_LIMIT>& data)
@@ -418,6 +423,7 @@ public:
 		uint32_t y, 
 		std::vector<wchar_t, TAlloc>& pass_buffer)
 	{
+		enable_cursor(hConsole);
 		const wchar_t left[] = L"┌──[";
 		const wchar_t middle[] = L"]~(";
 		const wchar_t right[] = L"):";
@@ -478,13 +484,13 @@ public:
 			buffer[ind].Char.UnicodeChar = bottom[i];
 		}		
 
-		COORD bufferSize = { (WORD)w, (WORD)h };
+		COORD bufferSize = { (SHORT)w, (SHORT)h };
 		COORD bufferCoord = { 0, 0 };
-		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
+		SMALL_RECT writeRegion = { (SHORT)x, (SHORT)y, (SHORT)(x + w - 1), (SHORT)(y + h - 1) };
 
 		WriteConsoleOutputW(hConsole, buffer.data(), bufferSize, bufferCoord, &writeRegion);
 
-		COORD pos = { (WORD)x+3, (WORD)y+1 };
+		COORD pos = { (SHORT)x+3, (SHORT)y+1 };
 		SetConsoleCursorPosition(hConsole, pos);
 
 		if constexpr (std::is_same_v<TAlloc, GuardAllocator<wchar_t>>)
@@ -495,6 +501,8 @@ public:
 		{
 			read_textbox(pass_buffer);
 		}
+
+		disable_cursor(hConsole);
 	}
 
 	/*
@@ -552,9 +560,9 @@ public:
 			}
 		}
 
-		COORD bufferSize = { (WORD)w, (WORD)h };
+		COORD bufferSize = { (SHORT)w, (SHORT)h };
 		COORD bufferCoord = { 0, 0 };
-		SMALL_RECT writeRegion = { (WORD)x, (WORD)y, (WORD)(x + w - 1), (WORD)(y + h - 1) };
+		SMALL_RECT writeRegion = { (SHORT)x, (SHORT)y, (SHORT)(x + w - 1), (SHORT)(y + h - 1) };
 
 		WriteConsoleOutputW(hBuffer, buffer.data(), bufferSize, bufferCoord, &writeRegion);
 		enable_cursor(hBuffer);
@@ -607,7 +615,98 @@ public:
 			CloseHandle(buffers[i]);
 		}
 
-
 		return option;
+	}
+
+	/*
+	* ┌[⛨PASS]~login: login     
+ 	* └[⛨PASS]~password: copied✔
+	*/
+	void text(const wchar_t* message, uint32_t x, uint32_t y)
+	{
+		const wchar_t left_up[] = L"┌[";
+		const wchar_t middle[] = L"]~login: ";
+		const wchar_t left_down[] = L"└[";
+		const wchar_t right_down[] = L"]~password: ";
+		const wchar_t copied[] = L"copied✔";
+		disable_cursor(hConsole);
+
+		size_t w_up = 
+			  std::wcslen(left_up)
+			+ std::wcslen(LOGO)
+			+ std::wcslen(middle)
+			+ std::wcslen(message);
+		size_t w_down =
+			std::wcslen(left_down)
+			+ std::wcslen(LOGO)
+			+ std::wcslen(right_down)
+			+ std::wcslen(copied);
+			
+		size_t h = 1;
+		size_t ind_up = 0;
+		size_t ind_down = 0;
+
+		std::vector<CHAR_INFO> buffer_up(w_up);
+		std::vector<CHAR_INFO> buffer_down(w_down);
+
+		clean();
+
+		for (size_t i = 0; i < std::wcslen(left_up); i++, ind_up++)
+		{
+			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer_up[ind_up].Char.UnicodeChar = left_up[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind_up++)
+		{
+			buffer_up[ind_up].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			buffer_up[ind_up].Char.UnicodeChar = LOGO[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(middle); i++, ind_up++)
+		{
+			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer_up[ind_up].Char.UnicodeChar = middle[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(message); i++, ind_up++)
+		{
+			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY;
+			buffer_up[ind_up].Char.UnicodeChar = message[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(left_down); i++, ind_down++)
+		{
+			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer_down[ind_down].Char.UnicodeChar = left_down[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind_down++)
+		{
+			buffer_down[ind_down].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			buffer_down[ind_down].Char.UnicodeChar = LOGO[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(right_down); i++, ind_down++)
+		{
+			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+			buffer_down[ind_down].Char.UnicodeChar = right_down[i];
+		}
+
+		for (size_t i = 0; i < std::wcslen(copied); i++, ind_down++)
+		{
+			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY;
+			buffer_down[ind_down].Char.UnicodeChar = copied[i];
+		}
+
+		COORD bufferSize = { (SHORT)w_up, (SHORT)h };
+		COORD bufferCoord = { 0, 0 };
+		SMALL_RECT writeRegion = { (SHORT)x, (SHORT)y, (SHORT)(x + w_up - 1), (SHORT)(y + h - 1) };
+
+		WriteConsoleOutputW(hConsole, buffer_up.data(), bufferSize, bufferCoord, &writeRegion);
+
+		bufferSize = { (SHORT)w_down, (SHORT)h };
+		writeRegion = { (SHORT)x, (SHORT)(y + 1) , (SHORT)(x + w_down - 1), (SHORT)(y + 1 +  h - 1) };
+		WriteConsoleOutputW(hConsole, buffer_down.data(), bufferSize, bufferCoord, &writeRegion);
 	}
 };
