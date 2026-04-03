@@ -118,7 +118,7 @@ public:
 
 		while (!stack.empty())
 		{
-			auto& [top, str] = stack.top();
+			auto [top, str] = stack.top();
 			stack.pop();
 			str += top->ch;
 			if (top->is_key)

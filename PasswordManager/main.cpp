@@ -2,8 +2,10 @@
 
 #include "PasswordManager.h"
 
+
 int main() 
 {
+
     PasswordManager pm;
 
     if (!SetConsoleCtrlHandler(PasswordManager::ctrl_handler, TRUE))
