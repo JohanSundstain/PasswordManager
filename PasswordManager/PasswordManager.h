@@ -1,13 +1,12 @@
 #pragma once
-#define USER_INFO_LIMIT 32
-#define PASSWORD_MAX 128
+#define USER_INFO_LIMIT 256
+#define PASSWORD_MAX 256
 #define MIN_RECORD 5
 
 #include <string>
 #include <vector>
-#include <sodium.h>
-#include <iostream>
 #include <windows.h>
+#include <sodium.h>
 
 #include "Console.hpp"
 #include "GuardAllocator.hpp"
@@ -21,6 +20,7 @@ enum class States {
 	END, 
 	SAVE_PASSWORD,
 	FIND_PASSWORD, 
+	CIPHER,
 	MENU,
 	DELETE_PASSWORD
 };
@@ -48,6 +48,7 @@ struct Header
 class PasswordManager
 {
 private:
+	static PasswordManager* instance;
 
 	std::unique_ptr<Header> header_ptr;
 	std::unique_ptr<Console> console_ptr;
@@ -57,21 +58,26 @@ private:
 	SafeVector<wchar_t> master_password;
 	
 	States state;
-	const std::string data_file = "data.encoded";
-
-	void encode_file();
-
-	uint32_t decode_file();
-
-	uint32_t confirm_password(const wchar_t*, SafeVector<wchar_t>&, SafeVector<wchar_t>&, bool);
-
-	void keygen(SafeVector<unsigned char>&);
-
-	void state_machine();
+	const std::wstring data_file = L"data.encoded";
 
 	void dump(const std::vector<unsigned char>&) const;
 
+	void dump(const std::vector<unsigned char>&, const wchar_t*) const;
+
 	void download(std::vector<unsigned char>&);
+
+	void download(std::vector<unsigned char>&, const wchar_t*);
+
+	void encode_file(const wchar_t*);
+
+	uint32_t decode_file(const wchar_t*);
+
+	uint32_t confirm_password(const wchar_t*, SafeVector<wchar_t>&, SafeVector<wchar_t>&, bool);
+
+	void keygen(SafeVector<unsigned char>&, const unsigned char*);
+
+	void state_machine();
+
 
 	// states functions
 	void launch();
@@ -86,11 +92,15 @@ private:
 
 	void find_password();
 
+	void cipher();
+
 	void copy_password(size_t);
 
 	void delete_password(size_t);
 
-	void exit();
+	void emergency_exit();
+
+	void exit_regular();
 
 	void register_names();
 
@@ -153,4 +163,21 @@ public:
 	~PasswordManager();
 
 	void run();
+
+	static BOOL WINAPI ctrl_handler(DWORD fdw_ctrl_type)
+	{
+
+		if (fdw_ctrl_type == CTRL_C_EVENT || fdw_ctrl_type == CTRL_BREAK_EVENT)
+		{
+			return TRUE;
+		}
+		else if (fdw_ctrl_type == CTRL_CLOSE_EVENT)
+		{
+			instance->emergency_exit();
+			return TRUE;
+		}
+	
+		return FALSE;
+	}
+
 };

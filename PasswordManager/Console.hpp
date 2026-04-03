@@ -5,7 +5,6 @@
 #include <vector>
 #include <cwchar>
 #include <array>
-#include <ctime>
 #include <chrono>
 #include <thread>
 
@@ -47,8 +46,7 @@ private:
 		SetConsoleMode(hInput, new_mode);
 
 		DWORD read = 0, written = 0;
-		wchar_t ch;
-
+		wchar_t ch = 0;;
 
 		while (true)
 		{
@@ -100,7 +98,7 @@ private:
 		SetConsoleMode(hInput, mode);
 	}
 
-	void read_password(SafeVector<wchar_t>& buffer)
+	void read_password(SafeVector<wchar_t>& buffer) const
 	{
 		DWORD mode;
 		GetConsoleMode(hInput, &mode);
@@ -156,12 +154,6 @@ private:
 		SetConsoleMode(hInput, mode);
 	}
 
-	void clear_input_buffer()
-	{
-		wchar_t c;
-		while (_kbhit()) { c = _getwch(); }
-	}
-
 	void enable_cursor(HANDLE handler)
 	{
 		CONSOLE_CURSOR_INFO cci;
@@ -178,7 +170,7 @@ private:
 		SetConsoleCursorInfo(handler, &cci);
 	}
 
-	void listen_menu(uint32_t& option, std::vector<HANDLE>& buffers)
+	void listen_menu(uint32_t& option, std::vector<HANDLE>& buffers) const 
 	{
 		for (auto hCon : buffers)
 		{ 
@@ -211,17 +203,6 @@ private:
 				}
 			}
 		}
-	}
-
-	COORD get_current_cursor_pos()
-	{
-		CONSOLE_SCREEN_BUFFER_INFO csbi;
-
-		if (GetConsoleScreenBufferInfo(hConsole, &csbi))
-		{
-			return { csbi.dwCursorPosition.X, csbi.dwCursorPosition.Y };
-		}
-		else return { 0, 0 };
 	}
 
 	/*
@@ -375,7 +356,7 @@ public:
 		SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
 	}
 
-	void clean_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+	void clean_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) const 
 	{
 		std::vector<CHAR_INFO> buffer(w * h);
 		for (size_t i = 0; i < h; i++)
@@ -394,7 +375,7 @@ public:
 		WriteConsoleOutputW(hConsole, buffer.data(), bufferSize, bufferCoord, &writeRegion);
 	}
 
-	void clean()
+	void clean() const 
 	{
 		COORD coord = { 0, 0 };
 		DWORD count;
@@ -706,4 +687,5 @@ public:
 		writeRegion = { (SHORT)x, (SHORT)(y + 1) , (SHORT)(x + w_down - 1), (SHORT)(y + 1 +  h - 1) };
 		WriteConsoleOutputW(hConsole, buffer_down.data(), bufferSize, bufferCoord, &writeRegion);
 	}
+
 };

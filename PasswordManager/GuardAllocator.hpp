@@ -1,6 +1,5 @@
 #pragma once 
 #include <windows.h>
-#include <stdexcept>
 #include <tuple>
 
 template <class T>
