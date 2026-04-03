@@ -28,7 +28,6 @@ public:
 
 	Presumer()
 	{
-		std::array<int, 20> s;
 		root_uptr = nullptr;
 		current_ptr = nullptr;
 	}

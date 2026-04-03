@@ -68,7 +68,7 @@ private:
 						if (!WriteConsoleW(
 							hConsole,
 							&buffer.data()[old],
-							buffer.size() - old,
+							static_cast<DWORD>(buffer.size() - old),
 							&written,
 							NULL))
 						{
@@ -197,12 +197,12 @@ private:
 				switch (record.Event.KeyEvent.wVirtualKeyCode)
 				{
 				case VK_UP:
-					option = option == 0 ? buffers.size() - 1 : option - 1;
+					option = option == 0 ? static_cast<uint32_t>(buffers.size() - 1) : option - 1;
 					SetConsoleActiveScreenBuffer(buffers[option]);
 					break;
 
 				case VK_DOWN:
-					option = option == buffers.size() - 1 ? 0 : option + 1;
+					option = option == static_cast<uint32_t>(buffers.size() - 1) ? 0 : option + 1;
 					SetConsoleActiveScreenBuffer(buffers[option]);
 					break;
 
@@ -227,14 +227,14 @@ private:
 	/*
 	 ⮞ word
 	*/
-	void auto_hint(std::vector<wchar_t>& buffer, uint32_t x, uint32_t y, size_t auto_hint_size)
+	void auto_hint(std::vector<wchar_t>& buffer, uint32_t x, uint32_t y, uint32_t auto_hint_size)
 	{
 		std::vector<std::wstring> result;
 		presumer->get_matchings(buffer, result);
 
 		size_t w = USER_INFO_LIMIT + 3;
 		size_t h = result.size() < auto_hint_size ? result.size() : auto_hint_size;;
-		clean_rect(x, y, w, auto_hint_size);
+		clean_rect(x, y, static_cast<uint32_t>(w), auto_hint_size);
 		std::vector<CHAR_INFO> screen_buffer(w * h);
 
 		
@@ -286,8 +286,8 @@ private:
 	}
 
 public:
-	static enum CODES {OK=200, ERR=403};
-	static enum Keybord {
+	enum CODES {OK=200, ERR=403};
+	enum Keybord {
 		ENTER = 0x0d,
 		BACKSPACE = 0x08,
 		TAB = 0x09,
@@ -303,8 +303,6 @@ public:
 		hInput = GetStdHandle(STD_INPUT_HANDLE);
 		presumer = std::make_unique<Presumer>();
 		disable_cursor(hConsole);
-
-		srand(time(NULL));
 	}
 
 	~Console()
@@ -355,13 +353,13 @@ public:
 		auto tick = ms / bar_size;
 		COORD text_place = { start_coord.X + static_cast<SHORT>(text_start) , start_coord.Y};
 		SetConsoleCursorPosition(hConsole, text_place);
-		WriteConsoleW(hConsole, message, length, &written, NULL);
+		WriteConsoleW(hConsole, message, static_cast<DWORD>(length), &written, NULL);
 		SetConsoleCursorPosition(hConsole, start_coord);
 
 		for (size_t i = 0; i < bar_size; i++)
 		{
 			SetConsoleCursorPosition(hConsole, start_coord);
-			FillConsoleOutputAttribute(hConsole, colors[i / step], bar_size, start_coord, &written);
+			FillConsoleOutputAttribute(hConsole, colors[i / step], static_cast<DWORD>(bar_size), start_coord, &written);
 
 			if (i < text_start - 1 || i > text_start + length)
 			{
@@ -440,7 +438,7 @@ public:
 		size_t ind = 0;
 
 		std::vector<CHAR_INFO> buffer(w * h);
-		clean_rect(x, y, PASSWORD_MAX, h);
+		clean_rect(x, y, PASSWORD_MAX, static_cast<uint32_t>(h));
 
 
 		for (size_t i = 0; i < std::wcslen(left); i++, ind++)
@@ -520,7 +518,7 @@ public:
 		disable_cursor(hBuffer);
 		size_t w = std::wcslen(message) + 2;
 		size_t h = 3;
-		clean_rect(x, y, 128, h);
+		clean_rect(x, y, 128, static_cast<uint32_t>(h));
 		std::vector<CHAR_INFO> buffer(w*h);
 
 		for (size_t i = 0; i < h; i++)
@@ -573,7 +571,6 @@ public:
 	{
 		clean();
 		std::vector<HANDLE> buffers;
-		CONSOLE_CURSOR_INFO cci;
 
 		for (size_t i = 0; i < options.size(); i++)
 		{
@@ -595,11 +592,11 @@ public:
 			{
 				if (j == i)
 				{
-					message_box(options[j].c_str(), 0, (j * 3), 0, buffers[i]);
+					message_box(options[j].c_str(), 0, static_cast<uint32_t>(j * 3), 0, buffers[i]);
 				}
 				else
 				{
-					message_box(options[j].c_str(), 0, (j * 3), 200, buffers[i]);
+					message_box(options[j].c_str(), 0, static_cast<uint32_t>(j * 3), 200, buffers[i]);
 				}
 			}
 		}
