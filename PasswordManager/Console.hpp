@@ -40,24 +40,33 @@ private:
 
 	void read_textbox(std::vector<wchar_t>& buffer)
 	{
-		DWORD mode, new_mode;
-		GetConsoleMode(hInput, &mode);
-		new_mode = mode & ~(ENABLE_LINE_INPUT);
-		SetConsoleMode(hInput, new_mode);
-
-		DWORD read = 0, written = 0;
-		wchar_t ch = 0;;
+		INPUT_RECORD record;
+		DWORD count = 0, written = 0;
 
 		while (true)
 		{
-			written = 0;
-			if (ReadConsoleW(hInput, &ch, 1, &read, NULL))
+			ReadConsoleInput(hInput, &record, 1, &count);
+
+			if (record.EventType == KEY_EVENT && record.Event.KeyEvent.bKeyDown)
 			{
-				if (ch == ENTER)
+				WORD vk = record.Event.KeyEvent.wVirtualKeyCode;
+				wchar_t ch = record.Event.KeyEvent.uChar.UnicodeChar;
+
+				if (vk == VK_RETURN)
 				{
 					break;
 				}
-				else if (ch == TAB && buffer.size() > 0)
+
+				if (vk == VK_BACK)
+				{
+					if (buffer.size() > 0)
+					{
+						WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
+						buffer.pop_back();
+					}
+					auto_hint(buffer, 0, 2, 5);
+				}
+				else if (vk == VK_TAB && buffer.size() > 0)
 				{
 					size_t old = buffer.size();
 					presumer->assume(buffer);
@@ -74,29 +83,19 @@ private:
 						}
 					}
 				}
-				else if (ch == BACKSPACE)
-				{
-					if (buffer.size() > 0)
-					{
-						WriteConsoleW(hConsole, L"\b \b", 3, NULL, NULL);
-						buffer.pop_back();
-					}
-					auto_hint(buffer, 0, 2, 5);
-				}
-				else if (ch >= WHITESPACE && buffer.size() < USER_INFO_LIMIT - 1)
+				else if (ch >= 32 && buffer.size() < USER_INFO_LIMIT - 1)
 				{
 					buffer.push_back(ch);
 					WriteConsoleW(hConsole, &ch, 1, NULL, NULL);
 					auto_hint(buffer, 0, 2, 5);
 				}
-
+	
 			}
 		}
-
+	
 		if (buffer.size() > 0) buffer.push_back(L'\0');
-
-		SetConsoleMode(hInput, mode);
 	}
+
 
 	void read_password(SafeVector<wchar_t>& buffer) const
 	{
@@ -122,7 +121,6 @@ private:
 				if (vk == VK_RETURN)
 				{
 					finished = true;
-					WriteConsoleW(hConsole, L"\n", 1, NULL, NULL);
 				}
 				else if (vk == VK_BACK && pos > 0)
 				{

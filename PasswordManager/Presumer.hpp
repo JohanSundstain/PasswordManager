@@ -44,7 +44,7 @@ public:
 		{
 			wchar_t c = key[i];
 			auto it = std::find_if(
-				current_ptr->childs.begin(), 
+				current_ptr->childs.begin(),
 				current_ptr->childs.end(),
 				[c](node* n)
 				{
@@ -52,9 +52,9 @@ public:
 				});
 
 			// if find an end, return back 
-			if (it == current_ptr->childs.end()) 
+			if (it == current_ptr->childs.end())
 			{
-				return; 
+				return;
 			}
 			else
 			{
@@ -143,14 +143,14 @@ public:
 
 		current_ptr = root_uptr.get();
 		bool is_key = false;
-		
+
 		for (size_t i = 0; i < size; i++)
 		{
 			wchar_t c = key[i];
 			is_key = (i == size - 1);
 
 			auto it = std::find_if(
-				current_ptr->childs.begin(), 
+				current_ptr->childs.begin(),
 				current_ptr->childs.end(),
 				[c](node* n)
 				{

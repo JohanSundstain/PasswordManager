@@ -11,7 +11,6 @@
 #include "Console.hpp"
 #include "GuardAllocator.hpp"
 
-
 enum class States {
 	LAUNCH,
 	SIGN_IN,
@@ -80,6 +79,7 @@ private:
 
 
 	// states functions
+
 	void launch();
 
 	void sign_in();
@@ -117,6 +117,36 @@ private:
 	{
 		console_ptr->clean_rect(0, 0, 128, 1);
 		console_ptr->interact(message, 0, 0, safe_buffer);
+	}
+
+	inline void clean_path(std::vector<wchar_t>& buffer)
+	{
+		buffer.erase(std::remove(buffer.begin(), buffer.end(), L'\"'), buffer.end());
+		buffer.erase(std::remove(buffer.begin(), buffer.end(), L'\''), buffer.end());
+
+		auto first = std::find_if(
+			buffer.begin(), 
+			buffer.end(),
+			[](wchar_t ch) 
+			{
+				return ch != L' ' && ch != L'\t' && ch != L'\0';
+			});
+
+		buffer.erase(buffer.begin(), first);
+
+		auto last = std::find_if(
+			buffer.rbegin(),
+			buffer.rend(),
+			[](wchar_t ch)
+			{
+				return ch != L' ' && ch != L'\t' && ch != L'\0';
+			});
+
+		if (last != buffer.rend())
+		{
+			buffer.erase(last.base(), buffer.end());
+			buffer.push_back(L'\0');
+		}
 	}
 
 	inline bool CopyToClipboard(const wchar_t* text)
