@@ -77,7 +77,6 @@ private:
 
 	void state_machine();
 
-
 	// states functions
 
 	void launch();
