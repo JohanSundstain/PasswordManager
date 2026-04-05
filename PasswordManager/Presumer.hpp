@@ -12,8 +12,8 @@ private:
 	struct node
 	{
 		std::vector<node*> childs;
-		wchar_t ch;
-		bool is_key;
+		wchar_t ch =  0x08;
+		bool is_key = false;
 
 		node(wchar_t ch, bool is_key) : ch(ch), is_key(is_key) {};
 		~node() { for (node* n : childs)delete n; }
@@ -166,7 +166,8 @@ public:
 			else
 			{
 				current_ptr = *it;
-				current_ptr->is_key = is_key;
+				if (is_key) current_ptr->is_key = is_key;
+				
 			}
 		}
 	}
