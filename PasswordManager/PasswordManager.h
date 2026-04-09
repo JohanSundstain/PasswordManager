@@ -97,9 +97,7 @@ private:
 
 	void delete_password(size_t);
 
-	void emergency_exit();
-
-	void exit_regular();
+	void exit();
 
 	void register_names();
 
@@ -202,7 +200,7 @@ public:
 		}
 		else if (fdw_ctrl_type == CTRL_CLOSE_EVENT)
 		{
-			instance->emergency_exit();
+			instance->exit();
 			return TRUE;
 		}
 	

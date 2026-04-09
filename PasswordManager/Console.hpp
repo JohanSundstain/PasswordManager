@@ -186,12 +186,12 @@ private:
 			{
 				switch (record.Event.KeyEvent.wVirtualKeyCode)
 				{
-				case VK_UP:
+				case VK_LEFT:
 					option = option == 0 ? static_cast<uint32_t>(buffers.size() - 1) : option - 1;
 					SetConsoleActiveScreenBuffer(buffers[option]);
 					break;
 
-				case VK_DOWN:
+				case VK_RIGHT:
 					option = option == static_cast<uint32_t>(buffers.size() - 1) ? 0 : option + 1;
 					SetConsoleActiveScreenBuffer(buffers[option]);
 					break;
@@ -262,6 +262,15 @@ private:
 
 		WriteConsoleOutputW(hConsole, screen_buffer.data(), bufferSize, bufferCoord, &writeRegion);
 
+	}
+
+	void draw_part(const wchar_t* str, std::vector<CHAR_INFO>& buffer, size_t& ind, WORD attribute)
+	{
+		for (size_t i = 0; i < std::wcslen(str); i++, ind++)
+		{
+			buffer[ind].Attributes = attribute;
+			buffer[ind].Char.UnicodeChar = str[i];
+		}
 	}
 
 public:
@@ -395,71 +404,39 @@ public:
 	└─$
 	*/
 	template <typename TAlloc>
-	void interact(const wchar_t* message, 
+	void interact(const wchar_t* message,
 		uint32_t x,
-		uint32_t y, 
+		uint32_t y,
 		std::vector<wchar_t, TAlloc>& pass_buffer)
 	{
 		enable_cursor(hConsole);
+
 		const wchar_t left[] = L"┌──[";
 		const wchar_t middle[] = L"]~(";
 		const wchar_t right[] = L"):";
-		const wchar_t bottom[] = L"└─$";
-		
+		const wchar_t bottom[] = L"└─";
+		const wchar_t sign[] = L"$";
 
-		size_t w = 
-			std::wcslen(message) 
-			+ std::wcslen(left) 
+
+		size_t w =
+			std::wcslen(message)
+			+ std::wcslen(left)
 			+ std::wcslen(LOGO)
 			+ std::wcslen(middle)
 			+ std::wcslen(right);
 		size_t h = 2;
-		size_t ind = 0;
 
 		std::vector<CHAR_INFO> buffer(w * h);
 		clean_rect(x, y, PASSWORD_MAX, static_cast<uint32_t>(h));
 
-
-		for (size_t i = 0; i < std::wcslen(left); i++, ind++)
-		{
-			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer[ind].Char.UnicodeChar = left[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind++)
-		{
-			buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			buffer[ind].Char.UnicodeChar = LOGO[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(middle); i++, ind++)
-		{
-			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer[ind].Char.UnicodeChar = middle[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(message); i++, ind++)
-		{
-			buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			buffer[ind].Char.UnicodeChar = message[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(right); i++, ind++)
-		{
-			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer[ind].Char.UnicodeChar = right[i];
-		}
-		
-		for (size_t i = 0; i < std::wcslen(bottom); i++, ind++)
-		{
-			if (i == std::wcslen(bottom) - 1)
-			{
-				buffer[ind].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			}
-			buffer[ind].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-
-			buffer[ind].Char.UnicodeChar = bottom[i];
-		}		
+		size_t ind = 0;
+		draw_part(left, buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(LOGO, buffer, ind, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		draw_part(middle, buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(message, buffer, ind, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY);
+		draw_part(right, buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(bottom, buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(sign, buffer, ind, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
 
 		COORD bufferSize = { (SHORT)w, (SHORT)h };
 		COORD bufferCoord = { 0, 0 };
@@ -546,13 +523,41 @@ public:
 
 	}
 
+
+	/*
+	* ┌─[⛨PASS]~(option1)─(option2)─(...):
+	  └─$(current option1)
+	   ┌─[⛨PASS]~(option1)─(option2)─(...):[⛨PA
+	   └───────────────────────────────
+	*/
 	uint32_t menu(std::vector<std::wstring>& options)
 	{
 		clean();
 		std::vector<HANDLE> buffers;
 
-		for (size_t i = 0; i < options.size(); i++)
+		const wchar_t left[] = L"┌──[";
+		const wchar_t left_op[] = L"]~(";
+		const wchar_t mid_op[] = L")─(";
+		const wchar_t right_op[] = L"):";
+		const wchar_t bottom[] = L"└─";
+		const wchar_t sign[] = L"$";
+
+		size_t w =
+			std::wcslen(left)
+			+ std::wcslen(LOGO)
+			+ std::wcslen(left_op)
+			+ (std::wcslen(mid_op) * options.size() - 1); // 1 - 2 - 3  - черточек на 1 меньше чем содержимого
+
+		for (auto str : options)
 		{
+			w += str.size();
+		}
+		size_t h = 2;
+
+		for (size_t op = 0; op < options.size(); op++)
+		{
+			std::vector<CHAR_INFO> screen_buffer(w * h);
+
 			HANDLE hBuffer = CreateConsoleScreenBuffer(
 				GENERIC_READ | GENERIC_WRITE,
 				0,                          
@@ -565,19 +570,51 @@ public:
 			}
 
 			buffers.push_back(hBuffer);
-
+			
+			size_t ind = 0;
+			draw_part(left, screen_buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+			draw_part(LOGO, screen_buffer, ind, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+			draw_part(left_op, screen_buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
 
 			for (size_t j = 0; j < options.size(); j++)
 			{
-				if (j == i)
+
+				if (j == op)
 				{
-					message_box(options[j].c_str(), 0, static_cast<uint32_t>(j * 3), 0, buffers[i]);
+					draw_part(options[j].c_str(), screen_buffer, ind, FOREGROUND_RED | FOREGROUND_INTENSITY);
 				}
 				else
 				{
-					message_box(options[j].c_str(), 0, static_cast<uint32_t>(j * 3), 200, buffers[i]);
+					draw_part(options[j].c_str(), screen_buffer, ind, FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY);
+
 				}
+
+
+				if (j == options.size() - 1)
+				{
+					draw_part(right_op, screen_buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+				}
+				else
+				{
+					draw_part(mid_op, screen_buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+				}
+				
 			}
+
+			draw_part(bottom, screen_buffer, ind, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+			draw_part(sign, screen_buffer, ind, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+			draw_part(options[op].c_str(), screen_buffer, ind, FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY);
+
+			SetConsoleActiveScreenBuffer(hBuffer);
+			CONSOLE_CURSOR_INFO cci;
+			GetConsoleCursorInfo(hBuffer, &cci);
+			cci.bVisible = FALSE;
+			SetConsoleCursorInfo(hBuffer, &cci);
+
+			COORD bufferSize = { (SHORT)w, (SHORT)h };
+			COORD bufferCoord = { 0, 0 };
+			SMALL_RECT writeRegion = { (SHORT)0, (SHORT)0, (SHORT)(w - 1), (SHORT)(h - 1) };
+			WriteConsoleOutputW(hBuffer, screen_buffer.data(), bufferSize, bufferCoord, &writeRegion);
 		}
 
 		uint32_t option = 0;
@@ -593,6 +630,7 @@ public:
 
 		return option;
 	}
+
 
 	/*
 	* ┌[⛨PASS]~login: login     
@@ -619,61 +657,23 @@ public:
 			+ std::wcslen(copied);
 			
 		size_t h = 1;
-		size_t ind_up = 0;
-		size_t ind_down = 0;
 
 		std::vector<CHAR_INFO> buffer_up(w_up);
 		std::vector<CHAR_INFO> buffer_down(w_down);
 
 		clean();
 
-		for (size_t i = 0; i < std::wcslen(left_up); i++, ind_up++)
-		{
-			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer_up[ind_up].Char.UnicodeChar = left_up[i];
-		}
+		size_t ind_up = 0;
+		draw_part(left_up, buffer_up, ind_up, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(LOGO, buffer_up, ind_up, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		draw_part(middle, buffer_up, ind_up, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(message, buffer_up, ind_up, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY);
 
-		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind_up++)
-		{
-			buffer_up[ind_up].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			buffer_up[ind_up].Char.UnicodeChar = LOGO[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(middle); i++, ind_up++)
-		{
-			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer_up[ind_up].Char.UnicodeChar = middle[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(message); i++, ind_up++)
-		{
-			buffer_up[ind_up].Attributes = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY;
-			buffer_up[ind_up].Char.UnicodeChar = message[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(left_down); i++, ind_down++)
-		{
-			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer_down[ind_down].Char.UnicodeChar = left_down[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(LOGO); i++, ind_down++)
-		{
-			buffer_down[ind_down].Attributes = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-			buffer_down[ind_down].Char.UnicodeChar = LOGO[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(right_down); i++, ind_down++)
-		{
-			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			buffer_down[ind_down].Char.UnicodeChar = right_down[i];
-		}
-
-		for (size_t i = 0; i < std::wcslen(copied); i++, ind_down++)
-		{
-			buffer_down[ind_down].Attributes = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY;
-			buffer_down[ind_down].Char.UnicodeChar = copied[i];
-		}
+		size_t ind_down = 0;
+		draw_part(left_down, buffer_down, ind_down, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(LOGO, buffer_down, ind_down, FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		draw_part(right_down, buffer_down, ind_down, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		draw_part(copied, buffer_down, ind_down, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY);
 
 		COORD bufferSize = { (SHORT)w_up, (SHORT)h };
 		COORD bufferCoord = { 0, 0 };
