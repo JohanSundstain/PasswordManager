@@ -99,6 +99,8 @@ private:
 
 	void exit();
 
+	void remove_data();
+
 	void register_names();
 
 	void error(const wchar_t*);
@@ -200,7 +202,7 @@ public:
 		}
 		else if (fdw_ctrl_type == CTRL_CLOSE_EVENT)
 		{
-			instance->exit();
+			instance->remove_data();
 			return TRUE;
 		}
 	
