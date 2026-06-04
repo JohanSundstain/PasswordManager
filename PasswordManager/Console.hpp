@@ -10,7 +10,22 @@
 
 #include "GuardAllocator.hpp"
 #include "Presumer.hpp"
+#include "qrcodegen.hpp"
 
+//        NO SWITCHES ?
+//⠀⣞⢽⢪⢣⢣⢣⢫⡺⡵⣝⡮⣗⢷⢽⢽⢽⣮⡷⡽⣜⣜⢮⢺⣜⢷⢽⢝⡽⣝
+//⠸⡸⠜⠕⠕⠁⢁⢇⢏⢽⢺⣪⡳⡝⣎⣏⢯⢞⡿⣟⣷⣳⢯⡷⣽⢽⢯⣳⣫⠇
+//⠀⠀⢀⢀⢄⢬⢪⡪⡎⣆⡈⠚⠜⠕⠇⠗⠝⢕⢯⢫⣞⣯⣿⣻⡽⣏⢗⣗⠏⠀
+//⠀⠪⡪⡪⣪⢪⢺⢸⢢⢓⢆⢤⢀⠀⠀⠀⠀⠈⢊⢞⡾⣿⡯⣏⢮⠷⠁⠀⠀
+//⠀⠀⠀⠈⠊⠆⡃⠕⢕⢇⢇⢇⢇⢇⢏⢎⢎⢆⢄⠀⢑⣽⣿⢝⠲⠉⠀⠀⠀⠀
+//⠀⠀⠀⠀⠀⡿⠂⠠⠀⡇⢇⠕⢈⣀⠀⠁⠡⠣⡣⡫⣂⣿⠯⢪⠰⠂⠀⠀⠀⠀
+//⠀⠀⠀⠀⡦⡙⡂⢀⢤⢣⠣⡈⣾⡃⠠⠄⠀⡄⢱⣌⣶⢏⢊⠂⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⠀⢝⡲⣜⡮⡏⢎⢌⢂⠙⠢⠐⢀⢘⢵⣽⣿⡿⠁⠁⠀⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⠀⠨⣺⡺⡕⡕⡱⡑⡆⡕⡅⡕⡜⡼⢽⡻⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⠀⣼⣳⣫⣾⣵⣗⡵⡱⡡⢣⢑⢕⢜⢕⡝⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⣴⣿⣾⣿⣿⣿⡿⡽⡑⢌⠪⡢⡣⣣⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⡟⡾⣿⢿⢿⢵⣽⣾⣼⣘⢸⢸⣞⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+//⠀⠀⠀⠀⠁⠇⠡⠩⡫⢿⣝⡻⡮⣒⢽⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 
 constexpr size_t BAR_SIZE = 32;
 constexpr size_t RUNIC_ALPH = 88;
@@ -95,7 +110,6 @@ private:
 	
 		if (buffer.size() > 0) buffer.push_back(L'\0');
 	}
-
 
 	void read_password(SafeVector<wchar_t>& buffer) const
 	{
@@ -271,6 +285,21 @@ private:
 			buffer[ind].Attributes = attribute;
 			buffer[ind].Char.UnicodeChar = str[i];
 		}
+	}
+
+	std::string wide_to_utf8(const wchar_t* message) 
+	{
+		if (!message) return "";
+
+		int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, message, -1, nullptr, 0, nullptr, nullptr);
+
+		if (sizeNeeded <= 0) return "";
+
+		std::string utf8Text(sizeNeeded - 1, 0); // -1, так как WideCharToMultiByte учитывает нуль-терминатор
+
+		WideCharToMultiByte(CP_UTF8, 0, message, -1, &utf8Text[0], sizeNeeded, nullptr, nullptr);
+
+		return utf8Text;
 	}
 
 public:
@@ -527,8 +556,6 @@ public:
 	/*
 	* ┌─[⛨PASS]~(option1)─(option2)─(...):
 	  └─$(current option1)
-	   ┌─[⛨PASS]~(option1)─(option2)─(...):[⛨PA
-	   └───────────────────────────────
 	*/
 	uint32_t menu(std::vector<std::wstring>& options)
 	{
@@ -629,6 +656,69 @@ public:
 		}
 
 		return option;
+	}
+
+
+	void draw_qrcode(const wchar_t* message)
+	{
+		// отрисовка qrcode
+		using qrcodegen::QrCode;
+
+		std::string utf8Text = wide_to_utf8(message);
+		QrCode qr = QrCode::encodeText(utf8Text.c_str(), QrCode::Ecc::LOW);
+
+		int border = 2;
+		int h = qr.getSize() + (border * 2);
+		int w = h * 2;
+
+		std::vector<CHAR_INFO> screen_buffer(h * w);
+
+		// белая заливка
+		for (int i = 0; i < h; i++)
+		{
+			for (int j = 0; j < w; j++)
+			{
+				size_t ind = i * w + j;
+				screen_buffer[ind].Attributes = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY;
+			}
+		}
+
+		// квадраты 
+		for (int i = 0; i < h; i++)
+		{
+			for (int j = 0; j < w; j+=2)
+			{
+				int qX = (j / 2) - border;
+				int qY = i - border;
+
+				int ind = i * w + j;
+
+				if (qr.getModule(qX, qY))
+				{
+					screen_buffer[ind].Char.UnicodeChar = L' ';
+					screen_buffer[ind+1].Char.UnicodeChar = L' ';
+					screen_buffer[ind].Attributes = 0;
+					screen_buffer[ind + 1].Attributes = 0;
+
+				}
+			}
+		}
+
+		COORD bufferSize = { (SHORT)w, (SHORT)h };
+		COORD bufferCoord = { 0, 0 };
+		SMALL_RECT writeRegion = { (SHORT)0, (SHORT)0, (SHORT)(w - 1), (SHORT)(h - 1) };
+
+		WriteConsoleOutputW(hConsole, screen_buffer.data(), bufferSize, bufferCoord, &writeRegion);
+
+	}
+	
+
+	void print_list(std::vector<std::wstring> list)
+	{
+		for (int i = 0; i < list.size(); i++)
+		{
+			std::wcout << (i + 1) << L". " << list[i] << std::endl;
+		}
 	}
 
 

@@ -20,6 +20,7 @@ enum class States {
 	SAVE_PASSWORD,
 	FIND_PASSWORD, 
 	CIPHER,
+	SHOW_ALL,
 	MENU,
 	DELETE_PASSWORD
 };
@@ -95,6 +96,8 @@ private:
 
 	void copy_password(size_t);
 
+	void qrcode(size_t);
+
 	void delete_password(size_t);
 
 	void exit();
@@ -108,6 +111,8 @@ private:
 	void success(const wchar_t*);
 
 	void show_pass(const wchar_t*);
+
+	void show_all();
 
 	void progress_bar(const wchar_t* message, std::chrono::milliseconds);
 
