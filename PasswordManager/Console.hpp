@@ -713,13 +713,16 @@ public:
 	}
 	
 
-	void print_list(std::vector<std::wstring> list)
+	void print_list(std::vector<std::wstring>& list)
 	{
-		for (int i = 0; i < list.size(); i++)
+		for (size_t i = 0; i < list.size(); i++)
 		{
-			std::wcout << (i + 1) << L". " << list[i] << std::endl;
+			std::wstring line = std::to_wstring(i + 1) + L". " + list[i] + L"\n";
+			DWORD charsWritten;
+			WriteConsoleW(hConsole, line.c_str(),(DWORD)line.size(),&charsWritten, nullptr);
 		}
 	}
+
 
 
 	/*

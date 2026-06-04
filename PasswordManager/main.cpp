@@ -4,6 +4,9 @@
 
 int main() 
 {
+    std::wcout.imbue(std::locale(""));
+    std::wcin.imbue(std::locale(""));
+
     PasswordManager pm;
 
     if (!SetConsoleCtrlHandler(PasswordManager::ctrl_handler, TRUE))
